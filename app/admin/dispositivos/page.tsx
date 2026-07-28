@@ -13,6 +13,7 @@ export default function DispositivosPage() {
   const [empresas, setEmpresas]         = useState<Empresa[]>([]);
   const [filtroStatus, setFiltroStatus] = useState('');
   const [filtroCnpj, setFiltroCnpj]     = useState('');
+  const [filtroAplicacao, setFiltroAplicacao] = useState('');
   const [loading, setLoading]           = useState(true);
   const [erro, setErro]                 = useState('');
   const [editandoNome, setEditandoNome] = useState<{ id: number; nome: string } | null>(null);
@@ -29,9 +30,10 @@ export default function DispositivosPage() {
   const carregar = useCallback(async () => {
     setLoading(true);
     try {
-      const params: { cnpj?: string; status?: string } = {};
-      if (filtroCnpj)   params.cnpj   = filtroCnpj;
-      if (filtroStatus) params.status = filtroStatus;
+      const params: { cnpj?: string; status?: string; aplicacao?: string } = {};
+      if (filtroCnpj)      params.cnpj      = filtroCnpj;
+      if (filtroStatus)    params.status    = filtroStatus;
+      if (filtroAplicacao) params.aplicacao = filtroAplicacao;
       setDispositivos(await api.getDispositivos(params));
       setErro('');
     } catch (e: unknown) {
@@ -39,7 +41,7 @@ export default function DispositivosPage() {
     } finally {
       setLoading(false);
     }
-  }, [filtroCnpj, filtroStatus]);
+  }, [filtroCnpj, filtroStatus, filtroAplicacao]);
 
   useEffect(() => { carregar(); }, [carregar]);
 
@@ -97,6 +99,17 @@ export default function DispositivosPage() {
           </select>
         )}
 
+        {/* Filtro aplicação */}
+        <select
+          value={filtroAplicacao}
+          onChange={e => setFiltroAplicacao(e.target.value)}
+          className="px-3 py-1.5 rounded-lg text-sm border border-gray-200 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+        >
+          <option value="">Todas as aplicações</option>
+          <option value="giro_web">Giro Web</option>
+          <option value="petshop_web">PetShop Web</option>
+        </select>
+
         {/* Filtro status */}
         {['', 'pendente', 'aprovado', 'bloqueado'].map(s => (
           <button
@@ -149,7 +162,12 @@ export default function DispositivosPage() {
               {dispositivos.map(d => (
                 <tr key={d.id} className="hover:bg-gray-50 transition-colors">
                   <td className="px-4 py-3">
-                    <div className="font-medium text-gray-900 truncate max-w-[160px]">{d.razao_social}</div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-medium text-gray-900 truncate max-w-[160px]">{d.razao_social}</span>
+                      {d.aplicacao === 'petshop_web' && (
+                        <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-medium">petshop web</span>
+                      )}
+                    </div>
                     <div className="text-xs text-gray-400">{d.cnpj}</div>
                   </td>
                   <td className="px-4 py-3">

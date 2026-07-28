@@ -30,7 +30,9 @@ export default function EmpresasPage() {
   const [mostrarSenha, setMostrarSenha] = useState(false);
   const [senhaEncriptada, setSenhaEncriptada] = useState('');
   const [formEmpresa, setFormEmpresa] = useState({ cnpj: '', razao_social: '', backend_url: '' });
-  const [formPorta, setFormPorta]     = useState({ nome: 'API Delphi', porta_local: '8082', protocolo: 'http', principal: true });
+  const [formPorta, setFormPorta]     = useState<{ nome: string; porta_local: string; protocolo: string; principal: boolean; aplicacao: 'giro_web' | 'petshop_web' }>(
+    { nome: 'API Delphi', porta_local: '8082', protocolo: 'http', principal: true, aplicacao: 'giro_web' }
+  );
   const [salvando, setSalvando]       = useState(false);
   const [loadingHealth, setLoadingHealth] = useState(false);
   const [tunnelHealth, setTunnelHealth]   = useState<Record<string, { status: string; connections: number }>>({});
@@ -228,6 +230,7 @@ export default function EmpresasPage() {
         porta_local: parseInt(formPorta.porta_local),
         protocolo:   formPorta.protocolo,
         principal:   formPorta.principal,
+        aplicacao:   formPorta.aplicacao,
       });
       const rows = await api.getPortas(empresaSel.cnpj);
       setPortas(rows);
@@ -444,7 +447,7 @@ export default function EmpresasPage() {
                   className="px-3 py-1.5 text-xs bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 transition-colors">
                   {loadingHealth ? '...' : '↺ Health'}
                 </button>
-                <button onClick={() => { setFormPorta({ nome: 'API Delphi', porta_local: '8082', protocolo: 'http', principal: portas.length === 0 }); setModal('nova-porta'); }}
+                <button onClick={() => { setFormPorta({ nome: 'API Delphi', porta_local: '8082', protocolo: 'http', principal: portas.length === 0, aplicacao: 'giro_web' }); setModal('nova-porta'); }}
                   className="px-3 py-1.5 text-xs bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors">
                   + Porta
                 </button>
@@ -470,6 +473,9 @@ export default function EmpresasPage() {
                             <span className="font-semibold text-gray-900 text-sm">{p.nome}</span>
                             {p.principal && (
                               <span className="text-xs bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded font-medium">principal</span>
+                            )}
+                            {p.aplicacao === 'petshop_web' && (
+                              <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-medium">petshop web</span>
                             )}
                             <span className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded font-mono">
                               :{p.porta_local} {p.protocolo}
@@ -616,6 +622,12 @@ export default function EmpresasPage() {
                   onChange={e => setFormPorta(f => ({ ...f, principal: e.target.checked }))}
                   className="rounded border-gray-300" />
                 Marcar como backend principal da empresa
+              </label>
+              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                <input type="checkbox" checked={formPorta.aplicacao === 'petshop_web'}
+                  onChange={e => setFormPorta(f => ({ ...f, aplicacao: e.target.checked ? 'petshop_web' : 'giro_web' }))}
+                  className="rounded border-gray-300" />
+                Backend para aplicação PetShop web
               </label>
             </div>
             <div className="flex justify-end gap-2 mt-5">

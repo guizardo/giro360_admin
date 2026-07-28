@@ -68,6 +68,7 @@ export interface TunnelPorta {
   porta_local: number;
   protocolo: string;
   principal: boolean;
+  aplicacao?: 'giro_web' | 'petshop_web';
   cf_tunnel_id: string | null;
   backend_url: string | null;
   ativo: boolean;
@@ -93,6 +94,7 @@ export interface Dispositivo {
   ip_registro: string;
   created_at: string;
   aprovado_por_nome: string | null;
+  aplicacao?: 'giro_web' | 'petshop_web';
 }
 
 export interface UsuarioAdmin {
@@ -162,7 +164,7 @@ export const api = {
   // Portas / Tunnels
   getPortas: (cnpj: string) =>
     req<TunnelPorta[]>(`/empresas/${cnpj}/portas`),
-  adicionarPorta: (cnpj: string, data: { nome: string; porta_local: number; protocolo: string; principal: boolean }) =>
+  adicionarPorta: (cnpj: string, data: { nome: string; porta_local: number; protocolo: string; principal: boolean; aplicacao?: 'giro_web' | 'petshop_web' }) =>
     req<TunnelPorta>(`/empresas/${cnpj}/portas`, { method: 'POST', body: JSON.stringify(data) }),
   editarPorta: (cnpj: string, id: number, data: Partial<TunnelPorta>) =>
     req<TunnelPorta>(`/empresas/${cnpj}/portas/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
@@ -212,7 +214,7 @@ export const api = {
   },
 
   // Dispositivos
-  getDispositivos: (params?: { cnpj?: string; status?: string }) => {
+  getDispositivos: (params?: { cnpj?: string; status?: string; aplicacao?: string }) => {
     const qs = new URLSearchParams(params as Record<string, string>).toString();
     return req<Dispositivo[]>(`/dispositivos${qs ? '?' + qs : ''}`);
   },
