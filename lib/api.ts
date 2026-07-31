@@ -52,6 +52,18 @@ export interface TunnelHealth {
   connections: number;
 }
 
+export interface CfTunnel {
+  id: string;
+  nome: string;
+  status: string;
+  conexoes: number;
+  criado_em: string;
+  orfao: boolean;
+  cnpj: string | null;
+  razao_social: string | null;
+  portas: string[] | null;
+}
+
 export interface TunnelInfo {
   tunnel_id?: string;
   backend_url?: string;
@@ -160,6 +172,13 @@ export const api = {
     req<Empresa>('/empresas', { method: 'POST', body: JSON.stringify(data) }),
   atualizarEmpresa: (cnpj: string, data: Partial<Empresa>) =>
     req<Empresa>(`/empresas/${cnpj}`, { method: 'PUT', body: JSON.stringify(data) }),
+  excluirEmpresa: (cnpj: string) =>
+    req<{ ok: boolean }>(`/empresas/${cnpj}`, { method: 'DELETE' }),
+
+  // Limpeza de tunnels órfãos na Cloudflare
+  getCfTunnels: () => req<CfTunnel[]>('/admin/cf-tunnels'),
+  deletarCfTunnel: (id: string) =>
+    req<{ ok: boolean }>(`/admin/cf-tunnels/${id}`, { method: 'DELETE' }),
 
   // Portas / Tunnels
   getPortas: (cnpj: string) =>

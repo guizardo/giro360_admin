@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
-import { api, type Empresa, type TunnelPorta, type TunnelHealth } from '@/lib/api';
+import { api, getUsuario, type Empresa, type TunnelPorta, type TunnelHealth, type Usuario } from '@/lib/api';
 import { crypt } from '@/lib/crypt';
 
 const STATUS_COR: Record<string, { dot: string; text: string; label: string }> = {
@@ -12,9 +12,10 @@ const STATUS_COR: Record<string, { dot: string; text: string; label: string }> =
   erro:         { dot: 'bg-red-400',    text: 'text-red-500',    label: 'Erro CF'      },
 };
 
-type Modal = null | 'empresa' | 'portas' | 'nova-porta' | 'instalar' | 'setup-token' | 'credenciais' | 'ini-padrao';
+type Modal = null | 'empresa' | 'portas' | 'nova-porta' | 'instalar' | 'setup-token' | 'credenciais' | 'ini-padrao' | 'excluir-empresa';
 
 export default function EmpresasPage() {
+  const [usuario, setUsuario]         = useState<Usuario | null>(null);
   const [empresas, setEmpresas]       = useState<Empresa[]>([]);
   const [loading, setLoading]         = useState(true);
   const [erro, setErro]               = useState('');
@@ -39,6 +40,9 @@ export default function EmpresasPage() {
   const [installerKey, setInstallerKey]   = useState('');
   const [iniPadraoConteudo, setIniPadraoConteudo] = useState('');
   const [jwtSecretEncriptado, setJwtSecretEncriptado] = useState('');
+  const [empresaExcluir, setEmpresaExcluir] = useState<Empresa | null>(null);
+  const [confirmExcluirTexto, setConfirmExcluirTexto] = useState('');
+  const [excluindo, setExcluindo] = useState(false);
 
   const carregar = useCallback(async () => {
     setLoading(true);
@@ -56,7 +60,7 @@ export default function EmpresasPage() {
     } catch { /* ignorar — admin sem permissão retorna 403 */ }
   }, []);
 
-  useEffect(() => { carregar(); carregarHealth(); }, [carregar, carregarHealth]);
+  useEffect(() => { setUsuario(getUsuario()); carregar(); carregarHealth(); }, [carregar, carregarHealth]);
 
   // ── Empresa ──────────────────────────────────────────────────
   function abrirNova() {
@@ -84,6 +88,27 @@ export default function EmpresasPage() {
   async function toggleAtivo(e: Empresa) {
     try { await api.atualizarEmpresa(e.cnpj, { ativo: !e.ativo }); carregar(); }
     catch (err: unknown) { alert(err instanceof Error ? err.message : 'Erro.'); }
+  }
+
+  function abrirExcluirEmpresa(e: Empresa) {
+    setConfirmExcluirTexto('');
+    setEmpresaExcluir(e);
+    setModal('excluir-empresa');
+  }
+
+  async function confirmarExcluirEmpresa() {
+    if (!empresaExcluir) return;
+    setExcluindo(true);
+    try {
+      await api.excluirEmpresa(empresaExcluir.cnpj);
+      setModal(null);
+      setEmpresaExcluir(null);
+      carregar();
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : 'Erro ao excluir.');
+    } finally {
+      setExcluindo(false);
+    }
   }
 
   // ── Portas ───────────────────────────────────────────────────
@@ -392,6 +417,12 @@ export default function EmpresasPage() {
                           className={`px-2 py-1 text-xs rounded transition-colors ${e.ativo ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-green-100 text-green-700 hover:bg-green-200'}`}>
                           {e.ativo ? 'Desativar' : 'Ativar'}
                         </button>
+                        {usuario?.role === 'superadmin' && (
+                          <button onClick={() => abrirExcluirEmpresa(e)}
+                            className="px-2 py-1 text-xs bg-red-50 text-red-600 rounded hover:bg-red-100 transition-colors">
+                            Excluir
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -874,6 +905,31 @@ API_HTTP=S` + (jwtSecretEncriptado ? `\nGIRO_JWT_SECRET_ENC=${jwtSecretEncriptad
               <button onClick={salvarCredenciais} disabled={salvando || (!formCred.api_senha.trim() && !portaCred.api_senha_set)}
                 className="px-4 py-2 bg-purple-600 text-white text-sm font-medium rounded-lg hover:bg-purple-700 disabled:opacity-50 transition-colors">
                 {salvando ? 'Salvando…' : 'Salvar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal Excluir Empresa ────────────────────────────────── */}
+      {modal === 'excluir-empresa' && empresaExcluir && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
+            <h2 className="text-lg font-bold text-red-700 mb-1">Excluir empresa</h2>
+            <p className="text-sm text-gray-600 mb-4">
+              Isso apaga <strong>{empresaExcluir.razao_social}</strong> permanentemente: tunnels na Cloudflare (DNS + conexões),
+              portas, usuários do portal, dispositivos aprovados e registros de acesso desta empresa. Não pode ser desfeito.
+            </p>
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              Digite o CNPJ <code className="bg-gray-100 px-1 rounded">{empresaExcluir.cnpj}</code> para confirmar:
+            </label>
+            <input value={confirmExcluirTexto} onChange={e => setConfirmExcluirTexto(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-red-500" />
+            <div className="flex justify-end gap-2 mt-5">
+              <button onClick={() => { setModal(null); setEmpresaExcluir(null); }} className="px-4 py-2 text-sm text-gray-600">Cancelar</button>
+              <button onClick={confirmarExcluirEmpresa} disabled={confirmExcluirTexto !== empresaExcluir.cnpj || excluindo}
+                className="px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 disabled:opacity-50">
+                {excluindo ? 'Excluindo...' : 'Excluir definitivamente'}
               </button>
             </div>
           </div>

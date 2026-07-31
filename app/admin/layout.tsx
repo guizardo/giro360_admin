@@ -8,6 +8,7 @@ const NAV = [
   { href: '/admin/dispositivos', label: 'Dispositivos',  icon: '💻' },
   { href: '/admin/empresas',     label: 'Empresas',      icon: '🏢' },
   { href: '/admin/usuarios',     label: 'Usuários',      icon: '👤' },
+  { href: '/admin/limpeza',      label: 'Limpeza CF',    icon: '🧹', superadminOnly: true },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -38,7 +39,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </div>
 
         <nav className="flex-1 py-4 space-y-1 px-3">
-          {NAV.map(item => {
+          {NAV.filter(item => !item.superadminOnly || usuario.role === 'superadmin').map(item => {
             const active = pathname.startsWith(item.href);
             return (
               <Link
