@@ -117,6 +117,17 @@ export interface SecurityAlert {
   message: string;
 }
 
+export interface Release {
+  id: number;
+  versao: string;
+  changelog: string | null;
+  arquivo_nome: string;
+  arquivo_tamanho: number;
+  sha256: string;
+  created_at: string;
+  criado_por_nome: string | null;
+}
+
 export interface UsuarioAdmin {
   id: number;
   cnpj: string;
@@ -256,6 +267,42 @@ export const api = {
     req<Dispositivo>(`/dispositivos/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   removerDispositivo: (id: number) =>
     req<{ ok: boolean }>(`/dispositivos/${id}`, { method: 'DELETE' }),
+
+  // Releases (Fase 2 — catálogo de versões do MVC_LOGIDOC)
+  getReleases: () => req<Release[]>('/admin/releases'),
+  uploadRelease: async (versao: string, changelog: string, arquivo: File): Promise<{ ok: boolean; release: Release }> => {
+    const token = getToken();
+    const form = new FormData();
+    form.append('versao', versao);
+    form.append('changelog', changelog);
+    form.append('arquivo', arquivo);
+    const res = await fetch(`${BASE_URL}/admin/releases`, {
+      method: 'POST',
+      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: form,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error((data as Record<string, string>).erro || `Erro ${res.status}`);
+    return data as { ok: boolean; release: Release };
+  },
+  baixarRelease: async (id: number, nomeArquivo: string): Promise<void> => {
+    const token = getToken();
+    const res = await fetch(`${BASE_URL}/admin/releases/${id}/download`, {
+      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error((data as Record<string, string>).erro || `Erro ${res.status}`);
+    }
+    const blob = await res.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = nomeArquivo;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  },
+  removerRelease: (id: number) =>
+    req<{ ok: boolean }>(`/admin/releases/${id}`, { method: 'DELETE' }),
 
   // Usuários
   getUsuarios: () => req<UsuarioAdmin[]>('/usuarios'),

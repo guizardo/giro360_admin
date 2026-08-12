@@ -8,6 +8,7 @@ const NAV = [
   { href: '/admin/dispositivos', label: 'Dispositivos',  icon: '💻' },
   { href: '/admin/empresas',     label: 'Empresas',      icon: '🏢' },
   { href: '/admin/usuarios',     label: 'Usuários',      icon: '👤' },
+  { href: '/admin/versoes',      label: 'Versões',       icon: '📦' },
   { href: '/admin/limpeza',      label: 'Limpeza CF',    icon: '🧹', superadminOnly: true },
 ];
 
