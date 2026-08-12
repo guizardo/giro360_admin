@@ -109,6 +109,12 @@ export interface Dispositivo {
   aplicacao?: 'giro_web' | 'petshop_web';
 }
 
+export interface SecurityAlert {
+  ts: string;
+  machine_id: string;
+  message: string;
+}
+
 export interface UsuarioAdmin {
   id: number;
   cnpj: string;
@@ -197,8 +203,15 @@ export const api = {
     req<{ ok: boolean }>(`/empresas/${cnpj}/portas/${id}/tunnel`, { method: 'DELETE' }),
   getInstalar: (cnpj: string, id: number) =>
     req<{ nome: string; porta_local: number; backend_url: string; instalar_windows: string; instalar_linux: string; desinstalar: string }>(`/empresas/${cnpj}/portas/${id}/instalar`),
-  gerarSetupToken: (cnpj: string, id: number) =>
-    req<{ ok: boolean; setup_token: string; porta_nome: string; aviso: string }>(`/empresas/${cnpj}/portas/${id}/setup-token`, { method: 'POST' }),
+  gerarSetupToken: (cnpj: string, id: number, machine_id?: string) =>
+    req<{ ok: boolean; setup_token: string; porta_nome: string; expira_em_minutos: number; travado_ao_equipamento: boolean; aviso: string }>(
+      `/empresas/${cnpj}/portas/${id}/setup-token`,
+      { method: 'POST', body: JSON.stringify(machine_id ? { machine_id } : {}) }
+    ),
+  getSecurityAlerts: (cnpj: string) =>
+    req<SecurityAlert[]>(`/empresas/${cnpj}/security-alerts`),
+  regenerarInstallerKey: (cnpj: string) =>
+    req<{ ok: boolean; aviso: string }>(`/empresas/${cnpj}/installer-key/regenerar`, { method: 'POST' }),
   editarCredenciais: (cnpj: string, id: number, api_usuario: string, api_senha: string) =>
     req<TunnelPorta>(`/empresas/${cnpj}/portas/${id}`, { method: 'PUT', body: JSON.stringify({ api_usuario, api_senha }) }),
   regenerarApiKey: (cnpj: string, id: number) =>

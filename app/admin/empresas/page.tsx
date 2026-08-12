@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
-import { api, getUsuario, type Empresa, type TunnelPorta, type TunnelHealth, type Usuario } from '@/lib/api';
+import { api, getUsuario, type Empresa, type TunnelPorta, type TunnelHealth, type Usuario, type SecurityAlert } from '@/lib/api';
 import { crypt } from '@/lib/crypt';
 
 const STATUS_COR: Record<string, { dot: string; text: string; label: string }> = {
@@ -25,7 +25,8 @@ export default function EmpresasPage() {
   const [portas, setPortas]           = useState<TunnelPorta[]>([]);
   const [portasHealth, setPortasHealth] = useState<Record<number, { status: string; connections: number }>>({});
   const [instalar, setInstalar]       = useState<{ nome: string; instalar_windows: string; instalar_linux: string; backend_url: string; desinstalar: string } | null>(null);
-  const [setupToken, setSetupToken]   = useState<{ token: string; porta_nome: string } | null>(null);
+  const [setupToken, setSetupToken]   = useState<{ token: string; porta_nome: string; expiraEmMinutos: number; travadoAoEquipamento: boolean } | null>(null);
+  const [alertasSeguranca, setAlertasSeguranca] = useState<SecurityAlert[]>([]);
   const [portaCred, setPortaCred]     = useState<TunnelPorta | null>(null);
   const [formCred, setFormCred]       = useState({ api_usuario: 'logidoc_api', api_senha: '' });
   const [mostrarSenha, setMostrarSenha] = useState(false);
@@ -116,10 +117,12 @@ export default function EmpresasPage() {
     setEmpresaSel(e);
     setPortas([]);
     setPortasHealth({});
+    setAlertasSeguranca([]);
     setModal('portas');
     const rows = await api.getPortas(e.cnpj);
     setPortas(rows);
     atualizarHealth(e.cnpj, rows);
+    api.getSecurityAlerts(e.cnpj).then(setAlertasSeguranca).catch(() => {});
   }
 
   async function atualizarHealth(cnpj: string, rows?: TunnelPorta[]) {
@@ -180,10 +183,16 @@ export default function EmpresasPage() {
 
   async function gerarSetupToken(porta: TunnelPorta) {
     if (!empresaSel) return;
-    if (!confirm(`Gerar novo token de instalação para "${porta.nome}"?\n\nO token anterior será invalidado.`)) return;
+    const machineId = window.prompt(
+      `Gerar novo token de instalação para "${porta.nome}"?\n\nO token anterior será invalidado.\n\n`
+      + `Se você já tem o UUID do equipamento do cliente (mostrado no UFormInstall antes de instalar — clique no rótulo "Máquina" lá para copiar), cole aqui para travar o token a essa máquina específica.\n`
+      + `Deixe em branco para gerar sem travar (qualquer equipamento que apresentar o token primeiro reivindica a porta).`,
+      ''
+    );
+    if (machineId === null) return; // cancelado
     try {
-      const result = await api.gerarSetupToken(empresaSel.cnpj, porta.id);
-      setSetupToken({ token: result.setup_token, porta_nome: result.porta_nome });
+      const result = await api.gerarSetupToken(empresaSel.cnpj, porta.id, machineId.trim() || undefined);
+      setSetupToken({ token: result.setup_token, porta_nome: result.porta_nome, expiraEmMinutos: result.expira_em_minutos, travadoAoEquipamento: result.travado_ao_equipamento });
       // Abrir modal de instalação para exibir o token
       const info = await api.getInstalar(empresaSel.cnpj, porta.id);
       setInstalar(info);
@@ -276,6 +285,15 @@ export default function EmpresasPage() {
       await api.limparMaquina(empresaSel.cnpj, p.id);
       const rows = await api.getPortas(empresaSel.cnpj);
       setPortas(rows);
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : 'Erro.'); }
+  }
+
+  async function regenerarInstallerKey() {
+    if (!empresaSel) return;
+    if (!confirm(`Gerar nova chave de instalador para "${empresaSel.razao_social}"?\n\nClientes já instalados com a chave anterior vão parar de sincronizar credenciais até receberem um novo INI Instalador.`)) return;
+    try {
+      const result = await api.regenerarInstallerKey(empresaSel.cnpj);
+      alert(result.aviso);
     } catch (e: unknown) { alert(e instanceof Error ? e.message : 'Erro.'); }
   }
 
@@ -478,6 +496,11 @@ export default function EmpresasPage() {
                   className="px-3 py-1.5 text-xs bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 transition-colors">
                   {loadingHealth ? '...' : '↺ Health'}
                 </button>
+                <button onClick={regenerarInstallerKey}
+                  title="Gira a installer_key desta empresa — clientes com o INI antigo param de sincronizar até receberem um novo"
+                  className="px-3 py-1.5 text-xs bg-amber-100 text-amber-700 rounded-lg hover:bg-amber-200 transition-colors">
+                  🔑 Chave instalador
+                </button>
                 <button onClick={() => { setFormPorta({ nome: 'API Delphi', porta_local: '8082', protocolo: 'http', principal: portas.length === 0, aplicacao: 'giro_web' }); setModal('nova-porta'); }}
                   className="px-3 py-1.5 text-xs bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors">
                   + Porta
@@ -485,6 +508,21 @@ export default function EmpresasPage() {
               </div>
             </div>
 
+            {alertasSeguranca.length > 0 && (
+              <div className="mb-4 bg-red-50 border border-red-200 rounded-xl p-3">
+                <p className="text-xs font-semibold text-red-800 mb-1.5">
+                  ⚠ {alertasSeguranca.length} tentativa{alertasSeguranca.length !== 1 ? 's' : ''} de ativação com equipamento diferente do registrado
+                </p>
+                <div className="space-y-1 max-h-28 overflow-y-auto">
+                  {alertasSeguranca.map((a, i) => (
+                    <p key={i} className="text-xs text-red-700">
+                      <span className="text-red-400">{new Date(a.ts).toLocaleString('pt-BR')}</span>{' '}
+                      — {a.message} <span className="font-mono text-red-400">(tentado: …{a.machine_id.slice(-8)})</span>
+                    </p>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {portas.length === 0 ? (
               <div className="py-12 text-center text-gray-400 text-sm">
@@ -683,7 +721,13 @@ export default function EmpresasPage() {
               {setupToken && (
                 <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
                   <p className="text-xs font-semibold text-blue-800 mb-1">Token de Instalação (Serviço Windows) — uso único</p>
-                  <p className="text-xs text-blue-600 mb-2">Use na instalação do CloudflaredService.exe na máquina do cliente.</p>
+                  <p className="text-xs text-blue-600 mb-2">
+                    Use na instalação do CloudflaredService.exe na máquina do cliente.
+                    Expira em {setupToken.expiraEmMinutos} minutos ou na primeira autenticação, o que ocorrer primeiro.
+                    {setupToken.travadoAoEquipamento
+                      ? ' 🔒 Travado ao equipamento informado — não funciona em outro computador.'
+                      : ' ⚠ Não travado a um equipamento — vale para o computador que apresentar primeiro.'}
+                  </p>
                   <div className="relative">
                     <code className="block text-xs bg-blue-900 text-blue-200 rounded px-3 py-2 break-all pr-16">{setupToken.token}</code>
                     <button onClick={() => copiar(setupToken.token)}
