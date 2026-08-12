@@ -278,6 +278,15 @@ export default function EmpresasPage() {
     navigator.clipboard.writeText(txt).catch(() => {});
   }
 
+  function tempoRelativo(iso: string): string {
+    const min = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+    if (min < 1) return 'agora';
+    if (min < 60) return `há ${min} min`;
+    const h = Math.floor(min / 60);
+    if (h < 24) return `há ${h}h`;
+    return `há ${Math.floor(h / 24)}d`;
+  }
+
   async function limparMaquina(p: import('@/lib/api').TunnelPorta) {
     if (!empresaSel) return;
     if (!confirm(`Liberar máquina registrada na porta "${p.nome}"?\nIsso invalidará a sessão atual e permitirá instalação em outro equipamento.`)) return;
@@ -580,6 +589,17 @@ export default function EmpresasPage() {
                               </span>
                             )}
                           </div>
+                          {/* Versão ativa do MVC_LOGIDOC (reportada pelo CloudflaredService) */}
+                          {p.versao_atual && (
+                            <div className="mt-1.5">
+                              <span className="inline-flex items-center gap-1 text-xs text-sky-700 bg-sky-50 border border-sky-200 px-1.5 py-0.5 rounded">
+                                📦 v{p.versao_atual}
+                                {p.versao_reportada_em && (
+                                  <span className="text-sky-400">· {tempoRelativo(p.versao_reportada_em)}</span>
+                                )}
+                              </span>
+                            </div>
+                          )}
                         </div>
 
                         {/* Ações */}

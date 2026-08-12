@@ -91,6 +91,8 @@ export interface TunnelPorta {
   api_key?: string;
   giro_jwt_secret?: string;
   machine_id?: string | null;
+  versao_atual?: string | null;
+  versao_reportada_em?: string | null;
   // health (só presente no endpoint /health)
   status?: string;
   connections?: number;
