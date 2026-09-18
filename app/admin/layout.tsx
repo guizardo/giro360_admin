@@ -9,6 +9,8 @@ const NAV = [
   { href: '/admin/empresas',     label: 'Empresas',      icon: '🏢' },
   { href: '/admin/usuarios',     label: 'Usuários',      icon: '👤' },
   { href: '/admin/versoes',      label: 'Versões',       icon: '📦' },
+  { href: '/admin/pacotes',      label: 'Pacotes',       icon: '🗃️' },
+  { href: '/admin/atualizacoes', label: 'Atualizações em massa', icon: '🚀', superadminOnly: true },
   { href: '/admin/limpeza',      label: 'Limpeza CF',    icon: '🧹', superadminOnly: true },
 ];
 

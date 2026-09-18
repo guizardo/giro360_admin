@@ -1,7 +1,27 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
-import { api, getUsuario, type Empresa, type TunnelPorta, type TunnelHealth, type Usuario, type SecurityAlert } from '@/lib/api';
+import { api, getUsuario, type Empresa, type TunnelPorta, type TunnelHealth, type Usuario, type SecurityAlert, type Release, type PerfilProvisionamento, type TesteTunnel } from '@/lib/api';
 import { crypt } from '@/lib/crypt';
+
+// Formata progressivamente os dígitos do CNPJ como 00.000.000/0000-00 —
+// só para exibição; o estado continua guardando somente dígitos.
+function gerarSenhaAleatoria(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%&*';
+  const bytes = new Uint8Array(20);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes).map(b => chars[b % chars.length]).join('');
+}
+
+function formatarCNPJ(digitsRaw: string): string {
+  const d = digitsRaw.replace(/\D/g, '').slice(0, 14);
+  const p1 = d.slice(0, 2), p2 = d.slice(2, 5), p3 = d.slice(5, 8), p4 = d.slice(8, 12), p5 = d.slice(12, 14);
+  let out = p1;
+  if (p2) out += '.' + p2;
+  if (p3) out += '.' + p3;
+  if (p4) out += '/' + p4;
+  if (p5) out += '-' + p5;
+  return out;
+}
 
 const STATUS_COR: Record<string, { dot: string; text: string; label: string }> = {
   healthy:      { dot: 'bg-green-500',  text: 'text-green-700',  label: 'Online'       },
@@ -12,7 +32,7 @@ const STATUS_COR: Record<string, { dot: string; text: string; label: string }> =
   erro:         { dot: 'bg-red-400',    text: 'text-red-500',    label: 'Erro CF'      },
 };
 
-type Modal = null | 'empresa' | 'portas' | 'nova-porta' | 'instalar' | 'setup-token' | 'credenciais' | 'ini-padrao' | 'excluir-empresa';
+type Modal = null | 'empresa' | 'portas' | 'nova-porta' | 'instalar' | 'setup-token' | 'credenciais' | 'ini-padrao' | 'excluir-empresa' | 'agendar-atualizacao' | 'perfil-provisionamento';
 
 export default function EmpresasPage() {
   const [usuario, setUsuario]         = useState<Usuario | null>(null);
@@ -24,17 +44,29 @@ export default function EmpresasPage() {
   const [editando, setEditando]       = useState<Empresa | null>(null);
   const [portas, setPortas]           = useState<TunnelPorta[]>([]);
   const [portasHealth, setPortasHealth] = useState<Record<number, { status: string; connections: number }>>({});
+  const [testando, setTestando]       = useState<Record<number, boolean>>({});
+  const [testeResultado, setTesteResultado] = useState<Record<number, TesteTunnel | { erro: string }>>({});
   const [instalar, setInstalar]       = useState<{ nome: string; instalar_windows: string; instalar_linux: string; backend_url: string; desinstalar: string } | null>(null);
-  const [setupToken, setSetupToken]   = useState<{ token: string; porta_nome: string; expiraEmMinutos: number; travadoAoEquipamento: boolean } | null>(null);
+  const [setupToken, setSetupToken]   = useState<{ token: string; pairingCode: string; porta_nome: string; expiraEmMinutos: number; travadoAoEquipamento: boolean } | null>(null);
   const [alertasSeguranca, setAlertasSeguranca] = useState<SecurityAlert[]>([]);
   const [portaCred, setPortaCred]     = useState<TunnelPorta | null>(null);
   const [formCred, setFormCred]       = useState({ api_usuario: 'logidoc_api', api_senha: '' });
   const [mostrarSenha, setMostrarSenha] = useState(false);
   const [senhaEncriptada, setSenhaEncriptada] = useState('');
   const [formEmpresa, setFormEmpresa] = useState({ cnpj: '', razao_social: '', backend_url: '' });
-  const [formPorta, setFormPorta]     = useState<{ nome: string; porta_local: string; protocolo: string; principal: boolean; aplicacao: 'giro_web' | 'petshop_web' }>(
-    { nome: 'API Delphi', porta_local: '8082', protocolo: 'http', principal: true, aplicacao: 'giro_web' }
+  const [formPorta, setFormPorta]     = useState<{ nome: string; porta_local: string; protocolo: string; principal: boolean; aplicacao: 'giro_web' | 'petshop_web'; produto: 'mvc_logidoc' | 'petshop_api' | 'logidoc_api_rest' }>(
+    { nome: 'API Delphi', porta_local: '8082', protocolo: 'http', principal: true, aplicacao: 'giro_web', produto: 'mvc_logidoc' }
   );
+  // Porta sendo corrigida (nome/protocolo/aplicacao/produto/principal) em vez de
+  // criada — reusa o mesmo modal/form. porta_local não é editável (editarPorta
+  // não altera essa coluna; mudar a porta local de verdade exige recriar).
+  const [portaEditando, setPortaEditando] = useState<TunnelPorta | null>(null);
+  // UI-only — "outros" não existe como produto no banco (mapeado pra mvc_logidoc,
+  // mesmo default de hoje pra portas genéricas tipo VNC/RDP); só controla a sugestão.
+  // "petshop_multicanal" também não é produto próprio -- é o mesmo 'petshop_api'
+  // do banco, só com sugestão de porta/protocolo diferente (linha nova, HTTPS,
+  // pro modelo local-first que roda ao lado da porta web-only já em produção).
+  const [aplicacaoPorta, setAplicacaoPorta] = useState<'mvc_logidoc' | 'petshop_api' | 'petshop_multicanal' | 'logidoc_api_rest' | 'outros'>('mvc_logidoc');
   const [salvando, setSalvando]       = useState(false);
   const [loadingHealth, setLoadingHealth] = useState(false);
   const [tunnelHealth, setTunnelHealth]   = useState<Record<string, { status: string; connections: number }>>({});
@@ -44,6 +76,19 @@ export default function EmpresasPage() {
   const [empresaExcluir, setEmpresaExcluir] = useState<Empresa | null>(null);
   const [confirmExcluirTexto, setConfirmExcluirTexto] = useState('');
   const [excluindo, setExcluindo] = useState(false);
+  // Fase 3 — agendamento de atualização
+  const [releases, setReleases]       = useState<Release[]>([]);
+  const [portaAgendar, setPortaAgendar] = useState<TunnelPorta | null>(null);
+  const [formAgendamento, setFormAgendamento] = useState({ versaoAlvo: '', janelaInicio: '02:00', janelaFim: '04:00' });
+  const [agendando, setAgendando]     = useState(false);
+  // Fase 6a — perfil de provisionamento
+  const [empresaPerfil, setEmpresaPerfil] = useState<Empresa | null>(null);
+  const [formPerfil, setFormPerfil]   = useState({
+    firebird_host: '', firebird_caminho_fdb: '', firebird_usuario: '', firebird_senha: '',
+    licenca: '', cod_filial_padrao: '', observacoes: '',
+  });
+  const [salvandoPerfil, setSalvandoPerfil] = useState(false);
+  const [carregandoPerfil, setCarregandoPerfil] = useState(false);
 
   const carregar = useCallback(async () => {
     setLoading(true);
@@ -112,17 +157,87 @@ export default function EmpresasPage() {
     }
   }
 
+  // ── Perfil de provisionamento (Fase 6a) ─────────────────────
+  async function abrirPerfilProvisionamento(e: Empresa) {
+    setEmpresaPerfil(e);
+    setFormPerfil({ firebird_host: '', firebird_caminho_fdb: '', firebird_usuario: '', firebird_senha: '', licenca: '', cod_filial_padrao: '', observacoes: '' });
+    setModal('perfil-provisionamento');
+    setCarregandoPerfil(true);
+    try {
+      const perfil = await api.getPerfilProvisionamento(e.cnpj);
+      if (perfil) {
+        setFormPerfil({
+          firebird_host: perfil.firebird_host || '',
+          firebird_caminho_fdb: perfil.firebird_caminho_fdb || '',
+          firebird_usuario: perfil.firebird_usuario || '',
+          firebird_senha: perfil.firebird_senha || '',
+          licenca: perfil.licenca || '',
+          cod_filial_padrao: perfil.cod_filial_padrao || '',
+          observacoes: perfil.observacoes || '',
+        });
+      }
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : 'Erro ao carregar perfil.'); }
+    finally { setCarregandoPerfil(false); }
+  }
+
+  async function salvarPerfilProvisionamento() {
+    if (!empresaPerfil) return;
+    setSalvandoPerfil(true);
+    try {
+      await api.salvarPerfilProvisionamento(empresaPerfil.cnpj, formPerfil);
+      setModal(null);
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : 'Erro ao salvar perfil.'); }
+    finally { setSalvandoPerfil(false); }
+  }
+
   // ── Portas ───────────────────────────────────────────────────
   async function abrirPortas(e: Empresa) {
     setEmpresaSel(e);
     setPortas([]);
     setPortasHealth({});
     setAlertasSeguranca([]);
+    setTesteResultado({});
     setModal('portas');
     const rows = await api.getPortas(e.cnpj);
     setPortas(rows);
     atualizarHealth(e.cnpj, rows);
     api.getSecurityAlerts(e.cnpj).then(setAlertasSeguranca).catch(() => {});
+    api.getReleases().then(setReleases).catch(() => {});
+  }
+
+  function abrirAgendamento(p: TunnelPorta) {
+    setPortaAgendar(p);
+    setFormAgendamento({
+      versaoAlvo: p.versao_alvo || '',
+      janelaInicio: (p.atualizacao_janela_inicio || '02:00').slice(0, 5),
+      janelaFim: (p.atualizacao_janela_fim || '04:00').slice(0, 5),
+    });
+    setModal('agendar-atualizacao');
+  }
+
+  async function salvarAgendamento() {
+    if (!empresaSel || !portaAgendar || !formAgendamento.versaoAlvo) return;
+    setAgendando(true);
+    try {
+      await api.definirVersaoAlvo(empresaSel.cnpj, portaAgendar.id, formAgendamento.versaoAlvo, formAgendamento.janelaInicio, formAgendamento.janelaFim);
+      setModal('portas');
+      const rows = await api.getPortas(empresaSel.cnpj);
+      setPortas(rows);
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : 'Erro.'); }
+    finally { setAgendando(false); }
+  }
+
+  async function testarPorta(porta: TunnelPorta) {
+    if (!empresaSel) return;
+    setTestando(t => ({ ...t, [porta.id]: true }));
+    try {
+      const resultado = await api.testarPorta(empresaSel.cnpj, porta.id);
+      setTesteResultado(r => ({ ...r, [porta.id]: resultado }));
+    } catch (e: unknown) {
+      setTesteResultado(r => ({ ...r, [porta.id]: { erro: e instanceof Error ? e.message : 'Erro.' } }));
+    } finally {
+      setTestando(t => ({ ...t, [porta.id]: false }));
+    }
   }
 
   async function atualizarHealth(cnpj: string, rows?: TunnelPorta[]) {
@@ -184,7 +299,7 @@ export default function EmpresasPage() {
   async function gerarSetupToken(porta: TunnelPorta) {
     if (!empresaSel) return;
     const machineId = window.prompt(
-      `Gerar novo token de instalação para "${porta.nome}"?\n\nO token anterior será invalidado.\n\n`
+      `Gerar novo código de ativação para "${porta.nome}"?\n\nO código/token anterior será invalidado.\n\n`
       + `Se você já tem o UUID do equipamento do cliente (mostrado no UFormInstall antes de instalar — clique no rótulo "Máquina" lá para copiar), cole aqui para travar o token a essa máquina específica.\n`
       + `Deixe em branco para gerar sem travar (qualquer equipamento que apresentar o token primeiro reivindica a porta).`,
       ''
@@ -192,7 +307,7 @@ export default function EmpresasPage() {
     if (machineId === null) return; // cancelado
     try {
       const result = await api.gerarSetupToken(empresaSel.cnpj, porta.id, machineId.trim() || undefined);
-      setSetupToken({ token: result.setup_token, porta_nome: result.porta_nome, expiraEmMinutos: result.expira_em_minutos, travadoAoEquipamento: result.travado_ao_equipamento });
+      setSetupToken({ token: result.setup_token, pairingCode: result.pairing_code, porta_nome: result.porta_nome, expiraEmMinutos: result.expira_em_minutos, travadoAoEquipamento: result.travado_ao_equipamento });
       // Abrir modal de instalação para exibir o token
       const info = await api.getInstalar(empresaSel.cnpj, porta.id);
       setInstalar(info);
@@ -211,10 +326,7 @@ export default function EmpresasPage() {
   }
 
   function gerarSenhaSegura() {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%&*';
-    const bytes = new Uint8Array(20);
-    crypto.getRandomValues(bytes);
-    const senha = Array.from(bytes).map(b => chars[b % chars.length]).join('');
+    const senha = gerarSenhaAleatoria();
     setFormCred(f => ({ ...f, api_senha: senha }));
     setSenhaEncriptada(crypt('C', senha));
     setMostrarSenha(true);
@@ -255,19 +367,103 @@ export default function EmpresasPage() {
     finally { setSalvando(false); }
   }
 
+  // Sugere porta_local/protocolo/aplicacao/principal com base na aplicação
+  // escolhida — agiliza o cadastro pros casos mais comuns, sem travar edição
+  // manual depois. "petshop_multicanal" grava produto='petshop_api' igual ao
+  // preset "PetShop_API" — são a mesma coisa pro banco, só a sugestão muda,
+  // pra caber lado a lado com uma porta web-only já em produção sem risco de
+  // alguém repetir a porta/protocolo errados na hora de cadastrar.
+  function selecionarAplicacaoPorta(app: 'mvc_logidoc' | 'petshop_api' | 'petshop_multicanal' | 'logidoc_api_rest' | 'outros') {
+    setAplicacaoPorta(app);
+    if (app === 'outros') {
+      setFormPorta(f => ({ ...f, produto: 'mvc_logidoc', protocolo: portaEditando ? f.protocolo : 'http', porta_local: portaEditando ? f.porta_local : '' }));
+      return;
+    }
+    const SUGESTOES: Record<'mvc_logidoc' | 'petshop_api' | 'petshop_multicanal' | 'logidoc_api_rest',
+      { porta: string; aplicacao: 'giro_web' | 'petshop_web'; protocolo: string; produto: 'mvc_logidoc' | 'petshop_api' | 'logidoc_api_rest' }> = {
+      mvc_logidoc:         { porta: '8082', aplicacao: 'giro_web',    protocolo: 'http',  produto: 'mvc_logidoc' },
+      petshop_api:         { porta: '8090', aplicacao: 'petshop_web', protocolo: 'http',  produto: 'petshop_api' },
+      petshop_multicanal:  { porta: '8075', aplicacao: 'petshop_web', protocolo: 'https', produto: 'petshop_api' },
+      logidoc_api_rest:    { porta: '8085', aplicacao: 'giro_web',    protocolo: 'http',  produto: 'logidoc_api_rest' },
+    };
+    const s = SUGESTOES[app];
+    setFormPorta(f => ({
+      ...f,
+      produto: s.produto,
+      porta_local: portaEditando ? f.porta_local : s.porta,
+      protocolo: s.protocolo,
+      aplicacao: s.aplicacao,
+      principal: (app === 'mvc_logidoc' && !portaEditando) ? portas.length === 0 : f.principal,
+    }));
+  }
+
+  // Mapeia uma porta existente de volta pro preset mais próximo -- só pra
+  // deixar o dropdown "Aplicação" num estado plausível ao abrir a edição;
+  // o valor real editado vem de formPorta, não desse mapeamento.
+  function presetDaPorta(p: TunnelPorta): 'mvc_logidoc' | 'petshop_api' | 'petshop_multicanal' | 'logidoc_api_rest' | 'outros' {
+    if (p.produto === 'petshop_api') return p.protocolo === 'https' ? 'petshop_multicanal' : 'petshop_api';
+    if (p.produto === 'logidoc_api_rest') return 'logidoc_api_rest';
+    if (p.produto === 'mvc_logidoc' && p.aplicacao === 'giro_web') return 'mvc_logidoc';
+    return 'outros';
+  }
+
+  function abrirEditarPorta(p: TunnelPorta) {
+    setPortaEditando(p);
+    setAplicacaoPorta(presetDaPorta(p));
+    setFormPorta({
+      nome:        p.nome,
+      porta_local: String(p.porta_local),
+      protocolo:   p.protocolo,
+      principal:   p.principal,
+      aplicacao:   p.aplicacao || 'giro_web',
+      produto:     p.produto || 'mvc_logidoc',
+    });
+    setModal('nova-porta');
+  }
+
   async function adicionarPorta() {
     if (!empresaSel) return;
     setSalvando(true);
     try {
-      await api.adicionarPorta(empresaSel.cnpj, {
+      const novaPorta = await api.adicionarPorta(empresaSel.cnpj, {
         nome:        formPorta.nome,
         porta_local: parseInt(formPorta.porta_local),
         protocolo:   formPorta.protocolo,
         principal:   formPorta.principal,
         aplicacao:   formPorta.aplicacao,
+        produto:     formPorta.produto,
+      });
+      // Credenciais com senha segura + tunnel CF, tudo automático — evita os
+      // passos manuais de "🔒 Credenciais" e "▶ Criar tunnel" depois de cadastrar
+      // a porta. Se algo falhar no meio do caminho, os botões continuam no card
+      // da porta pra completar manualmente (nada fica bloqueado).
+      await api.editarCredenciais(empresaSel.cnpj, novaPorta.id, 'logidoc_api', gerarSenhaAleatoria());
+      const rows = await api.getPortas(empresaSel.cnpj);
+      setPortas(rows);
+      const portaCriada = rows.find(r => r.id === novaPorta.id) ?? novaPorta;
+      await criarTunnelPorta(portaCriada); // já deixa aberto o modal "Instalar" com o comando pronto
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : 'Erro.'); }
+    finally { setSalvando(false); }
+  }
+
+  // Corrige nome/protocolo/principal/aplicacao/produto de uma porta já
+  // existente. Não mexe em porta_local nem recria tunnel/credenciais -- se
+  // protocolo mudou e a porta já tem tunnel, o backend já reconstrói o
+  // ingress da Cloudflare sozinho (ver editarPorta em api/cloudflare.js).
+  async function salvarEdicaoPorta() {
+    if (!empresaSel || !portaEditando) return;
+    setSalvando(true);
+    try {
+      await api.editarPorta(empresaSel.cnpj, portaEditando.id, {
+        nome:      formPorta.nome,
+        protocolo: formPorta.protocolo,
+        principal: formPorta.principal,
+        aplicacao: formPorta.aplicacao,
+        produto:   formPorta.produto,
       });
       const rows = await api.getPortas(empresaSel.cnpj);
       setPortas(rows);
+      setPortaEditando(null);
       setModal('portas');
     } catch (e: unknown) { alert(e instanceof Error ? e.message : 'Erro.'); }
     finally { setSalvando(false); }
@@ -341,6 +537,10 @@ export default function EmpresasPage() {
   }
 
   const totalAtivos  = empresas.filter(e => e.ativo).length;
+  // Código de ativação e liberar máquina são, na prática, um conceito por
+  // empresa: gerarTunnelConfig no backend sempre resolve a porta principal
+  // (ORDER BY principal DESC, id LIMIT 1) — ativar em outra porta não tem efeito.
+  const portaPrincipal = portas.find(p => p.principal);
 
   return (
     <div className="p-6">
@@ -440,6 +640,11 @@ export default function EmpresasPage() {
                           className="px-2 py-1 text-xs bg-indigo-50 text-indigo-700 rounded hover:bg-indigo-100 transition-colors">
                           Editar
                         </button>
+                        <button onClick={() => abrirPerfilProvisionamento(e)}
+                          title="Dados de instalação (Firebird, licença, filial) para uma futura instalação automatizada"
+                          className="px-2 py-1 text-xs bg-sky-50 text-sky-700 rounded hover:bg-sky-100 transition-colors">
+                          🗂️ Perfil instalação
+                        </button>
                         <button onClick={() => toggleAtivo(e)}
                           className={`px-2 py-1 text-xs rounded transition-colors ${e.ativo ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-green-100 text-green-700 hover:bg-green-200'}`}>
                           {e.ativo ? 'Desativar' : 'Ativar'}
@@ -468,9 +673,10 @@ export default function EmpresasPage() {
             <div className="space-y-3">
               {!editando && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">CNPJ (somente números)</label>
-                  <input value={formEmpresa.cnpj} onChange={e => setFormEmpresa(f => ({ ...f, cnpj: e.target.value }))}
-                    maxLength={14} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="00000000000000" />
+                  <label className="block text-sm font-medium text-gray-700 mb-1">CNPJ</label>
+                  <input value={formatarCNPJ(formEmpresa.cnpj)}
+                    onChange={e => setFormEmpresa(f => ({ ...f, cnpj: e.target.value.replace(/\D/g, '').slice(0, 14) }))}
+                    maxLength={18} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="00.000.000/0000-00" />
                 </div>
               )}
               <div>
@@ -510,7 +716,20 @@ export default function EmpresasPage() {
                   className="px-3 py-1.5 text-xs bg-amber-100 text-amber-700 rounded-lg hover:bg-amber-200 transition-colors">
                   🔑 Chave instalador
                 </button>
-                <button onClick={() => { setFormPorta({ nome: 'API Delphi', porta_local: '8082', protocolo: 'http', principal: portas.length === 0, aplicacao: 'giro_web' }); setModal('nova-porta'); }}
+                <button onClick={() => portaPrincipal && gerarSetupToken(portaPrincipal)}
+                  disabled={!portaPrincipal?.cf_tunnel_id}
+                  title={portaPrincipal?.cf_tunnel_id ? 'Gera o código de ativação da porta principal desta empresa' : 'Crie o tunnel da porta principal antes de gerar o código de ativação'}
+                  className="px-3 py-1.5 text-xs bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                  🔑 Código de ativação
+                </button>
+                {portaPrincipal?.machine_id && (
+                  <button onClick={() => limparMaquina(portaPrincipal)}
+                    title="Libera a máquina registrada na porta principal, permitindo instalação em outro equipamento"
+                    className="px-3 py-1.5 text-xs bg-amber-100 text-amber-700 rounded-lg hover:bg-amber-200 transition-colors">
+                    🖥 Liberar máquina
+                  </button>
+                )}
+                <button onClick={() => { setPortaEditando(null); setAplicacaoPorta('mvc_logidoc'); setFormPorta({ nome: 'API Delphi', porta_local: '8082', protocolo: 'http', principal: portas.length === 0, aplicacao: 'giro_web', produto: 'mvc_logidoc' }); setModal('nova-porta'); }}
                   className="px-3 py-1.5 text-xs bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors">
                   + Porta
                 </button>
@@ -555,6 +774,11 @@ export default function EmpresasPage() {
                             {p.aplicacao === 'petshop_web' && (
                               <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-medium">petshop web</span>
                             )}
+                            {p.produto && p.produto !== 'mvc_logidoc' && (
+                              <span className="text-xs bg-teal-100 text-teal-700 px-1.5 py-0.5 rounded font-medium">
+                                {p.produto === 'petshop_api' ? 'PetShop_API' : 'LogiDoc_API_REST'}
+                              </span>
+                            )}
                             <span className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded font-mono">
                               :{p.porta_local} {p.protocolo}
                             </span>
@@ -572,6 +796,69 @@ export default function EmpresasPage() {
                                 </span>
                               </div>
                               <code className="text-xs text-indigo-600 truncate block">{p.backend_url}</code>
+                              {testeResultado[p.id] && (
+                                !('alcancavel' in testeResultado[p.id]) ? (
+                                  <div className="mt-1 text-xs text-red-600">
+                                    🧪 Falha ao testar: {(testeResultado[p.id] as { erro: string }).erro}
+                                  </div>
+                                ) : (
+                                  (() => {
+                                    const t = testeResultado[p.id] as TesteTunnel;
+                                    if (!t.alcancavel) {
+                                      if (t.etapa === 'credenciais') {
+                                        return (
+                                          <div className="mt-1 text-xs text-amber-600">
+                                            🧪 ⚠ {t.erro}
+                                          </div>
+                                        );
+                                      }
+                                      return (
+                                        <div className="mt-1 text-xs text-red-600">
+                                          🧪 ✗ Não respondeu: {t.erro}
+                                        </div>
+                                      );
+                                    }
+                                    const status = t.http_status ?? 0;
+                                    if (t.etapa === 'token') {
+                                      return (
+                                        <div className="mt-1 text-xs text-amber-600">
+                                          🧪 ⚠ {t.erro} (HTTP {status} em {t.tempo_ms}ms)
+                                        </div>
+                                      );
+                                    }
+                                    if (status >= 500) {
+                                      return (
+                                        <div className="mt-1 text-xs text-red-600">
+                                          🧪 ✗ Tunnel não alcança a API local (HTTP {status} em {t.tempo_ms}ms — cloudflared não conseguiu falar com o serviço)
+                                        </div>
+                                      );
+                                    }
+                                    if (status === 404) {
+                                      // Token ja emitido e aceito nesta etapa (senao teria caido no
+                                      // ramo etapa==='token' acima) -- ja prova tunnel + credenciais
+                                      // OK. 404 aqui so' significa que essa instalacao roda uma versao
+                                      // anterior a rota /api (GetVersao), nao um problema real.
+                                      return (
+                                        <div className="mt-1 text-xs text-green-700">
+                                          🧪 ✓ Token emitido e aceito em {t.tempo_ms}ms (tunnel + credenciais OK — versão instalada não expõe /api, comum em builds mais antigos)
+                                        </div>
+                                      );
+                                    }
+                                    if (status >= 400) {
+                                      return (
+                                        <div className="mt-1 text-xs text-amber-600">
+                                          🧪 ⚠ API respondeu HTTP {status} em {t.tempo_ms}ms (tunnel OK, mas o caminho testado retornou erro)
+                                        </div>
+                                      );
+                                    }
+                                    return (
+                                      <div className="mt-1 text-xs text-green-700">
+                                        🧪 ✓ Respondeu HTTP {status} em {t.tempo_ms}ms (fim-a-fim: tunnel + token + endpoint validados)
+                                      </div>
+                                    );
+                                  })()
+                                )
+                              )}
                             </>
                           ) : (
                             <span className="text-xs text-gray-400 italic">tunnel não criado</span>
@@ -600,10 +887,31 @@ export default function EmpresasPage() {
                               </span>
                             </div>
                           )}
+                          {/* Fase 3 — agendamento de atualização */}
+                          {p.versao_alvo && p.versao_alvo !== p.versao_atual && (
+                            <div className="mt-1.5">
+                              <span className={`inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded border ${
+                                (p.atualizacao_tentativas_falhas || 0) >= 3
+                                  ? 'text-red-700 bg-red-50 border-red-200'
+                                  : 'text-violet-700 bg-violet-50 border-violet-200'
+                              }`}>
+                                📅 alvo v{p.versao_alvo} · janela {(p.atualizacao_janela_inicio || '').slice(0, 5)}–{(p.atualizacao_janela_fim || '').slice(0, 5)}
+                                {(p.atualizacao_tentativas_falhas || 0) > 0 && (
+                                  <span> · {p.atualizacao_tentativas_falhas} falha{p.atualizacao_tentativas_falhas !== 1 ? 's' : ''}
+                                    {(p.atualizacao_tentativas_falhas || 0) >= 3 ? ' (parado, precisa reagendar)' : ''}
+                                  </span>
+                                )}
+                              </span>
+                            </div>
+                          )}
                         </div>
 
                         {/* Ações */}
                         <div className="flex flex-col gap-1.5 shrink-0">
+                          <button onClick={() => abrirEditarPorta(p)}
+                            className="px-2.5 py-1 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors whitespace-nowrap">
+                            ✏ Editar
+                          </button>
                           {!p.cf_tunnel_id ? (
                             <button onClick={() => criarTunnelPorta(p)} disabled={salvando}
                               className="px-2.5 py-1 text-xs bg-orange-500 text-white rounded hover:bg-orange-600 transition-colors disabled:opacity-50 whitespace-nowrap">
@@ -611,13 +919,17 @@ export default function EmpresasPage() {
                             </button>
                           ) : (
                             <>
+                              <button onClick={() => testarPorta(p)} disabled={!!testando[p.id]}
+                                className="px-2.5 py-1 text-xs bg-cyan-100 text-cyan-700 rounded hover:bg-cyan-200 transition-colors disabled:opacity-50 whitespace-nowrap">
+                                {testando[p.id] ? '🧪 Testando...' : '🧪 Testar'}
+                              </button>
+                              <button onClick={() => abrirAgendamento(p)}
+                                className="px-2.5 py-1 text-xs bg-violet-100 text-violet-700 rounded hover:bg-violet-200 transition-colors whitespace-nowrap">
+                                📅 Agendar atualização
+                              </button>
                               <button onClick={() => verInstalar(p)}
                                 className="px-2.5 py-1 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200 transition-colors whitespace-nowrap">
                                 📋 Instalar
-                              </button>
-                              <button onClick={() => gerarSetupToken(p)}
-                                className="px-2.5 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors whitespace-nowrap">
-                                🔑 Token serviço
                               </button>
                               <button onClick={() => downloadIniInstalador(p)}
                                 title="Baixar CLOUDFLARED_BACKEND.INI com setup_token para distribuir ao cliente"
@@ -628,12 +940,6 @@ export default function EmpresasPage() {
                                 className="px-2.5 py-1 text-xs bg-purple-100 text-purple-700 rounded hover:bg-purple-200 transition-colors whitespace-nowrap">
                                 🔒 Credenciais
                               </button>
-                              {p.machine_id && (
-                                <button onClick={() => limparMaquina(p)}
-                                  className="px-2.5 py-1 text-xs bg-amber-100 text-amber-700 rounded hover:bg-amber-200 transition-colors whitespace-nowrap">
-                                  🖥 Liberar máquina
-                                </button>
-                              )}
                             </>
                           )}
                           {p.cf_tunnel_id && (
@@ -667,7 +973,7 @@ export default function EmpresasPage() {
       {modal === 'nova-porta' && empresaSel && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
-            <h2 className="text-lg font-bold text-gray-900 mb-4">Nova porta</h2>
+            <h2 className="text-lg font-bold text-gray-900 mb-4">{portaEditando ? 'Editar porta' : 'Nova porta'}</h2>
 
             {/* Preview do hostname que será gerado */}
             {formPorta.porta_local && (
@@ -676,13 +982,26 @@ export default function EmpresasPage() {
                 <code className="font-mono">
                   https://{empresaSel.cnpj.substring(0, 8)}{formPorta.principal ? '' : `-p${formPorta.porta_local}`}.logidoc.work
                 </code>
-                {portas.some(p => p.cf_tunnel_id) && (
+                {!portaEditando && portas.some(p => p.cf_tunnel_id) && (
                   <span className="block mt-1 text-indigo-500">Será adicionado ao tunnel existente desta empresa.</span>
                 )}
               </div>
             )}
 
             <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Aplicação <span className="font-normal text-gray-400">(sugere porta e opções abaixo)</span>
+                </label>
+                <select value={aplicacaoPorta} onChange={e => selecionarAplicacaoPorta(e.target.value as typeof aplicacaoPorta)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                  <option value="mvc_logidoc">MVC_LOGIDOC</option>
+                  <option value="petshop_api">PetShop_API</option>
+                  <option value="petshop_multicanal">PetShop Multicanal (local + web, HTTPS)</option>
+                  <option value="logidoc_api_rest">LogiDoc_API_REST</option>
+                  <option value="outros">Outros (VNC, RDP, etc.)</option>
+                </select>
+              </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Nome do serviço</label>
                 <input value={formPorta.nome} onChange={e => setFormPorta(f => ({ ...f, nome: e.target.value }))}
@@ -692,8 +1011,10 @@ export default function EmpresasPage() {
               <div className="flex gap-2">
                 <div className="flex-1">
                   <label className="block text-sm font-medium text-gray-700 mb-1">Porta local</label>
-                  <input type="number" value={formPorta.porta_local} onChange={e => setFormPorta(f => ({ ...f, porta_local: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                  <input type="number" value={formPorta.porta_local} disabled={!!portaEditando}
+                    onChange={e => setFormPorta(f => ({ ...f, porta_local: e.target.value }))}
+                    title={portaEditando ? 'Porta local não pode ser alterada depois de criada — exclua e crie uma nova se precisar mudar.' : undefined}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-gray-100 disabled:text-gray-500" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Protocolo</label>
@@ -720,10 +1041,138 @@ export default function EmpresasPage() {
               </label>
             </div>
             <div className="flex justify-end gap-2 mt-5">
-              <button onClick={() => setModal('portas')} className="px-4 py-2 text-sm text-gray-600">Cancelar</button>
-              <button onClick={adicionarPorta} disabled={salvando || !formPorta.nome || !formPorta.porta_local}
+              <button onClick={() => { setPortaEditando(null); setModal('portas'); }} className="px-4 py-2 text-sm text-gray-600">Cancelar</button>
+              <button onClick={portaEditando ? salvarEdicaoPorta : adicionarPorta}
+                disabled={salvando || !formPorta.nome || !formPorta.porta_local}
                 className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50">
-                {salvando ? 'Adicionando...' : 'Adicionar'}
+                {salvando ? 'Salvando...' : (portaEditando ? 'Salvar alterações' : 'Adicionar')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal Agendar Atualização (Fase 3) ───────────────────── */}
+      {modal === 'agendar-atualizacao' && portaAgendar && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
+            <h2 className="text-lg font-bold text-gray-900 mb-1">Agendar atualização — {portaAgendar.nome}</h2>
+            <p className="text-sm text-gray-500 mb-4">
+              Versão atual: <code className="bg-gray-100 px-1 rounded">{portaAgendar.versao_atual || '—'}</code>
+            </p>
+            <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs px-3 py-2.5 rounded-lg mb-4">
+              Sem checagem de requisição em andamento — a troca acontece assim que o horário chegar,
+              sem esperar nenhuma operação terminar. Escolha uma janela de horário em que o cliente
+              realmente não usa o sistema.
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Versão alvo</label>
+                <select value={formAgendamento.versaoAlvo} onChange={e => setFormAgendamento(f => ({ ...f, versaoAlvo: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                  <option value="">Selecione uma versão...</option>
+                  {releases.filter(r => r.produto === (portaAgendar?.produto || 'mvc_logidoc')).map(r => (
+                    <option key={r.id} value={r.versao}>v{r.versao}{r.changelog ? ` — ${r.changelog.slice(0, 40)}` : ''}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Janela — início</label>
+                  <input type="time" value={formAgendamento.janelaInicio}
+                    onChange={e => setFormAgendamento(f => ({ ...f, janelaInicio: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Janela — fim</label>
+                  <input type="time" value={formAgendamento.janelaFim}
+                    onChange={e => setFormAgendamento(f => ({ ...f, janelaFim: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                </div>
+              </div>
+              <p className="text-xs text-gray-400">
+                Todo dia, dentro dessa janela, o CloudflaredService tenta atualizar até conseguir.
+                Depois de 3 tentativas falhas seguidas, ele para sozinho e espera você reagendar.
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 mt-5">
+              <button onClick={() => setModal('portas')} className="px-4 py-2 text-sm text-gray-600">Cancelar</button>
+              <button onClick={salvarAgendamento} disabled={agendando || !formAgendamento.versaoAlvo}
+                className="px-4 py-2 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700 disabled:opacity-50">
+                {agendando ? 'Agendando...' : 'Agendar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal Perfil de Provisionamento (Fase 6a) ────────────── */}
+      {modal === 'perfil-provisionamento' && empresaPerfil && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
+            <h2 className="text-lg font-bold text-gray-900 mb-1">Perfil de instalação — {empresaPerfil.razao_social}</h2>
+            <p className="text-sm text-gray-500 mb-4">
+              Dados que hoje só existem no <code className="bg-gray-100 px-1 rounded">path.ini</code> da máquina do cliente.
+              Cadastrar aqui antes da visita técnica é o que vai permitir, no futuro, gerar a instalação sem o
+              técnico precisar digitar esses valores.
+            </p>
+            {carregandoPerfil ? (
+              <div className="py-8 text-center text-gray-400 text-sm">Carregando...</div>
+            ) : (
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Host Firebird</label>
+                    <input value={formPerfil.firebird_host} onChange={e => setFormPerfil(f => ({ ...f, firebird_host: e.target.value }))}
+                      placeholder="127.0.0.1"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Filial padrão</label>
+                    <input value={formPerfil.cod_filial_padrao} onChange={e => setFormPerfil(f => ({ ...f, cod_filial_padrao: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Caminho do banco (.FDB)</label>
+                  <input value={formPerfil.firebird_caminho_fdb} onChange={e => setFormPerfil(f => ({ ...f, firebird_caminho_fdb: e.target.value }))}
+                    placeholder="E:\cliente\pasta\LOGICBOXMULTI.FDB"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Usuário Firebird</label>
+                    <input value={formPerfil.firebird_usuario} onChange={e => setFormPerfil(f => ({ ...f, firebird_usuario: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Senha Firebird</label>
+                    <input value={formPerfil.firebird_senha} onChange={e => setFormPerfil(f => ({ ...f, firebird_senha: e.target.value }))}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Licença</label>
+                  <input value={formPerfil.licenca} onChange={e => setFormPerfil(f => ({ ...f, licenca: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Observações</label>
+                  <textarea value={formPerfil.observacoes} onChange={e => setFormPerfil(f => ({ ...f, observacoes: e.target.value }))}
+                    rows={2}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                </div>
+                <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs px-3 py-2.5 rounded-lg">
+                  Estes campos, incluindo a senha do Firebird, ficam em texto plano no banco — mesmo padrão já usado
+                  hoje para as demais credenciais operacionais desta plataforma (senha da API, chave de instalador).
+                </div>
+              </div>
+            )}
+            <div className="flex justify-end gap-2 mt-5">
+              <button onClick={() => setModal(null)} className="px-4 py-2 text-sm text-gray-600">Cancelar</button>
+              <button onClick={salvarPerfilProvisionamento} disabled={salvandoPerfil || carregandoPerfil}
+                className="px-4 py-2 bg-sky-600 text-white text-sm font-medium rounded-lg hover:bg-sky-700 disabled:opacity-50">
+                {salvandoPerfil ? 'Salvando...' : 'Salvar'}
               </button>
             </div>
           </div>
@@ -742,25 +1191,42 @@ export default function EmpresasPage() {
                 <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
                   <p className="text-xs font-semibold text-blue-800 mb-1">Token de Instalação (Serviço Windows) — uso único</p>
                   <p className="text-xs text-blue-600 mb-2">
-                    Use na instalação do CloudflaredService.exe na máquina do cliente.
-                    Expira em {setupToken.expiraEmMinutos} minutos ou na primeira autenticação, o que ocorrer primeiro.
+                    Expira em {setupToken.expiraEmMinutos >= 60 ? `${setupToken.expiraEmMinutos / 60}h` : `${setupToken.expiraEmMinutos} min`} ou na primeira autenticação, o que ocorrer primeiro.
                     {setupToken.travadoAoEquipamento
                       ? ' 🔒 Travado ao equipamento informado — não funciona em outro computador.'
                       : ' ⚠ Não travado a um equipamento — vale para o computador que apresentar primeiro.'}
                   </p>
-                  <div className="relative">
-                    <code className="block text-xs bg-blue-900 text-blue-200 rounded px-3 py-2 break-all pr-16">{setupToken.token}</code>
-                    <button onClick={() => copiar(setupToken.token)}
-                      className="absolute right-2 top-1.5 text-xs bg-blue-700 hover:bg-blue-600 text-white px-2 py-1 rounded">Copiar</button>
+
+                  <div className="bg-white border-2 border-blue-300 rounded-lg p-3 mb-3">
+                    <p className="text-xs font-semibold text-blue-700 mb-1">Código de ativação — dite por telefone/WhatsApp</p>
+                    <p className="text-xs text-gray-500 mb-2">
+                      No instalador, o cliente clica em &quot;Já tenho um código de ativação&quot; e digita este código. Sem download de arquivo.
+                    </p>
+                    <div className="relative">
+                      <code className="block text-center text-2xl font-bold tracking-[0.3em] bg-blue-900 text-blue-100 rounded px-3 py-3 pr-16">
+                        {setupToken.pairingCode}
+                      </code>
+                      <button onClick={() => copiar(setupToken.pairingCode)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-xs bg-blue-700 hover:bg-blue-600 text-white px-2 py-1 rounded">Copiar</button>
+                    </div>
                   </div>
-                  <p className="text-xs text-blue-700 mt-2">Comando de instalação:</p>
-                  <div className="relative mt-1">
-                    <code className="block text-xs bg-gray-900 text-green-400 rounded px-3 py-2 break-all pr-16">
-                      {`CloudflaredService.exe /install --setup-token ${setupToken.token} --cnpj ${empresaSel?.cnpj}`}
-                    </code>
-                    <button onClick={() => copiar(`CloudflaredService.exe /install --setup-token ${setupToken.token} --cnpj ${empresaSel?.cnpj}`)}
-                      className="absolute right-2 top-1.5 text-xs bg-gray-700 hover:bg-gray-600 text-white px-2 py-1 rounded">Copiar</button>
-                  </div>
+
+                  <details className="text-xs text-blue-700">
+                    <summary className="cursor-pointer select-none">Alternativa: token completo / comando manual</summary>
+                    <div className="relative mt-2">
+                      <code className="block text-xs bg-blue-900 text-blue-200 rounded px-3 py-2 break-all pr-16">{setupToken.token}</code>
+                      <button onClick={() => copiar(setupToken.token)}
+                        className="absolute right-2 top-1.5 text-xs bg-blue-700 hover:bg-blue-600 text-white px-2 py-1 rounded">Copiar</button>
+                    </div>
+                    <p className="text-blue-700 mt-2">Comando de instalação:</p>
+                    <div className="relative mt-1">
+                      <code className="block text-xs bg-gray-900 text-green-400 rounded px-3 py-2 break-all pr-16">
+                        {`CloudflaredService.exe /install --setup-token ${setupToken.token} --cnpj ${empresaSel?.cnpj}`}
+                      </code>
+                      <button onClick={() => copiar(`CloudflaredService.exe /install --setup-token ${setupToken.token} --cnpj ${empresaSel?.cnpj}`)}
+                        className="absolute right-2 top-1.5 text-xs bg-gray-700 hover:bg-gray-600 text-white px-2 py-1 rounded">Copiar</button>
+                    </div>
+                  </details>
                 </div>
               )}
 
@@ -923,46 +1389,52 @@ export default function EmpresasPage() {
               </div>
             </div>
 
-            {/* Passo 3 – INI gerado */}
-            {senhaEncriptada && (
-              <div className="bg-gray-950 rounded-xl p-3 mb-4">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs font-semibold text-gray-300">Arquivo <span className="text-yellow-300">API_LOGIDOC_HTTP.INI</span> — colocar na pasta do serviço</p>
-                  <div className="flex gap-1">
-                    <button
-                      onClick={() => copiar(
-                        `[API_HTTP]\nUSUARIO_API=${formCred.api_usuario}\nSENHA_API_HTTP=${senhaEncriptada}\nAPI_HTTP=S` +
-                        (jwtSecretEncriptado ? `\nGIRO_JWT_SECRET_ENC=${jwtSecretEncriptado}` : '')
-                      )}
-                      className="text-xs bg-gray-700 hover:bg-gray-600 text-white px-2 py-0.5 rounded">
-                      Copiar
-                    </button>
-                    <button
-                      onClick={() => {
-                        const conteudo = `[API_HTTP]\r\nUSUARIO_API=${formCred.api_usuario}\r\nSENHA_API_HTTP=${senhaEncriptada}\r\nAPI_HTTP=S` +
-                          (jwtSecretEncriptado ? `\r\nGIRO_JWT_SECRET_ENC=${jwtSecretEncriptado}` : '') + '\r\n';
-                        const blob = new Blob([conteudo], { type: 'text/plain' });
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = 'API_LOGIDOC_HTTP.INI';
-                        a.click();
-                        URL.revokeObjectURL(url);
-                      }}
-                      className="text-xs bg-green-700 hover:bg-green-600 text-white px-2 py-0.5 rounded">
-                      ↓ Download
-                    </button>
+            {/* Passo 3 – INI gerado (formato varia por produto: PetShop_API lê
+                API_PETSHOP.INI/[API]/SENHA_ENC — ver UService_Logidoc.pas — os
+                demais seguem o formato histórico do MVC_LOGIDOC) */}
+            {senhaEncriptada && (() => {
+              const isPetshop = portaCred.produto === 'petshop_api';
+              const nomeArquivo = isPetshop ? 'API_PETSHOP.INI' : 'API_LOGIDOC_HTTP.INI';
+              const linhas = isPetshop
+                ? [`[API]`, `USUARIO=${formCred.api_usuario}`, `SENHA_ENC=${senhaEncriptada}`]
+                : [`[API_HTTP]`, `USUARIO_API=${formCred.api_usuario}`, `SENHA_API_HTTP=${senhaEncriptada}`, `API_HTTP=S`,
+                    ...(jwtSecretEncriptado ? [`GIRO_JWT_SECRET_ENC=${jwtSecretEncriptado}`] : [])];
+              return (
+                <div className="bg-gray-950 rounded-xl p-3 mb-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs font-semibold text-gray-300">Arquivo <span className="text-yellow-300">{nomeArquivo}</span> — colocar na pasta do serviço</p>
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => copiar(linhas.join('\n'))}
+                        className="text-xs bg-gray-700 hover:bg-gray-600 text-white px-2 py-0.5 rounded">
+                        Copiar
+                      </button>
+                      <button
+                        onClick={() => {
+                          const conteudo = linhas.join('\r\n') + '\r\n';
+                          const blob = new Blob([conteudo], { type: 'text/plain' });
+                          const url = URL.createObjectURL(blob);
+                          const a = document.createElement('a');
+                          a.href = url;
+                          a.download = nomeArquivo;
+                          a.click();
+                          URL.revokeObjectURL(url);
+                        }}
+                        className="text-xs bg-green-700 hover:bg-green-600 text-white px-2 py-0.5 rounded">
+                        ↓ Download
+                      </button>
+                    </div>
                   </div>
+                  <pre className="text-xs text-green-400 whitespace-pre-wrap break-all leading-5 select-all overflow-x-auto">{linhas.join('\n')}</pre>
+                  <p className="text-xs text-gray-500 mt-2">Salvar como <code className="text-gray-400">{nomeArquivo}</code> na mesma pasta do executável. Senha criptografada localmente.</p>
+                  {isPetshop && (
+                    <p className="text-xs text-amber-500 mt-1">
+                      ⚠ Requer PetShop_API atualizado (lê SENHA_ENC além do SENHA em texto puro, com fallback — ver UService_Logidoc.pas).
+                    </p>
+                  )}
                 </div>
-                <pre className="text-xs text-green-400 whitespace-pre-wrap break-all leading-5 select-all overflow-x-auto">{
-`[API_HTTP]
-USUARIO_API=${formCred.api_usuario}
-SENHA_API_HTTP=${senhaEncriptada}
-API_HTTP=S` + (jwtSecretEncriptado ? `\nGIRO_JWT_SECRET_ENC=${jwtSecretEncriptado}` : '')
-                }</pre>
-                <p className="text-xs text-gray-500 mt-2">Salvar como <code className="text-gray-400">API_LOGIDOC_HTTP.INI</code> na mesma pasta do executável. Senha criptografada localmente.</p>
-              </div>
-            )}
+              );
+            })()}
 
             <div className="flex justify-end gap-2">
               <button onClick={() => setModal('portas')} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Fechar</button>

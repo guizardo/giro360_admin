@@ -2,6 +2,12 @@
 import { useEffect, useState, useCallback } from 'react';
 import { api, getUsuario, type Release, type Usuario } from '@/lib/api';
 
+const PRODUTO_LABEL: Record<string, string> = {
+  mvc_logidoc: 'MVC_LOGIDOC',
+  petshop_api: 'PetShop_API',
+  logidoc_api_rest: 'LogiDoc_API_REST',
+};
+
 function formatarTamanho(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -14,6 +20,7 @@ export default function VersoesPage() {
   const [erro, setErro]         = useState('');
   const [busca, setBusca]       = useState('');
   const [modal, setModal]       = useState<null | 'upload' | 'excluir'>(null);
+  const [formProduto, setFormProduto] = useState<'mvc_logidoc' | 'petshop_api' | 'logidoc_api_rest'>('mvc_logidoc');
   const [formVersao, setFormVersao]         = useState('');
   const [formChangelog, setFormChangelog]   = useState('');
   const [formArquivo, setFormArquivo]       = useState<File | null>(null);
@@ -32,12 +39,12 @@ export default function VersoesPage() {
   useEffect(() => { setUsuario(getUsuario()); carregar(); }, [carregar]);
 
   const filtrados = releases.filter(r => {
-    const alvo = `${r.versao} ${r.changelog ?? ''} ${r.criado_por_nome ?? ''}`.toLowerCase();
+    const alvo = `${PRODUTO_LABEL[r.produto] || r.produto} ${r.versao} ${r.changelog ?? ''} ${r.criado_por_nome ?? ''}`.toLowerCase();
     return alvo.includes(busca.toLowerCase());
   });
 
   function abrirUpload() {
-    setFormVersao(''); setFormChangelog(''); setFormArquivo(null);
+    setFormProduto('mvc_logidoc'); setFormVersao(''); setFormChangelog(''); setFormArquivo(null);
     setModal('upload');
   }
 
@@ -45,7 +52,7 @@ export default function VersoesPage() {
     if (!formVersao.trim() || !formArquivo) return;
     setEnviando(true);
     try {
-      await api.uploadRelease(formVersao.trim(), formChangelog.trim(), formArquivo);
+      await api.uploadRelease(formProduto, formVersao.trim(), formChangelog.trim(), formArquivo);
       setModal(null);
       await carregar();
     } catch (e: unknown) { alert(e instanceof Error ? e.message : 'Erro ao enviar.'); }
@@ -76,9 +83,9 @@ export default function VersoesPage() {
     <div className="p-6">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-xl font-bold text-gray-900">Versões — MVC_LOGIDOC</h1>
+          <h1 className="text-xl font-bold text-gray-900">Versões</h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            {releases.length} versão{releases.length !== 1 ? 'ões' : ''} no catálogo
+            {releases.length} versão{releases.length !== 1 ? 'ões' : ''} no catálogo — MVC_LOGIDOC, PetShop_API e LogiDoc_API_REST
           </p>
         </div>
         <div className="flex gap-2">
@@ -114,6 +121,7 @@ export default function VersoesPage() {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
+                <th className="text-left px-4 py-3 font-medium text-gray-600">Produto</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Versão</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Changelog</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Arquivo</th>
@@ -124,6 +132,11 @@ export default function VersoesPage() {
             <tbody className="divide-y divide-gray-100">
               {filtrados.map(r => (
                 <tr key={r.id} className="hover:bg-gray-50 transition-colors">
+                  <td className="px-4 py-3">
+                    <span className="text-xs bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded font-medium">
+                      {PRODUTO_LABEL[r.produto] || r.produto}
+                    </span>
+                  </td>
                   <td className="px-4 py-3">
                     <span className="font-mono font-semibold text-gray-900">v{r.versao}</span>
                   </td>
@@ -161,8 +174,17 @@ export default function VersoesPage() {
       {modal === 'upload' && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
-            <h2 className="text-lg font-bold text-gray-900 mb-4">Nova versão do MVC_LOGIDOC</h2>
+            <h2 className="text-lg font-bold text-gray-900 mb-4">Nova versão</h2>
             <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Produto</label>
+                <select value={formProduto} onChange={e => setFormProduto(e.target.value as typeof formProduto)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                  <option value="mvc_logidoc">MVC_LOGIDOC</option>
+                  <option value="petshop_api">PetShop_API</option>
+                  <option value="logidoc_api_rest">LogiDoc_API_REST</option>
+                </select>
+              </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Versão</label>
                 <input value={formVersao} onChange={e => setFormVersao(e.target.value)}
@@ -176,7 +198,7 @@ export default function VersoesPage() {
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Arquivo (MVC_LOGIDOC.exe)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Arquivo (.exe)</label>
                 <input type="file" onChange={e => setFormArquivo(e.target.files?.[0] || null)}
                   className="w-full text-sm text-gray-600" />
               </div>

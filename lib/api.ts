@@ -46,6 +46,16 @@ export interface Empresa {
   tunnel_ativo: boolean | null;
 }
 
+export interface TesteTunnel {
+  ok: boolean;
+  alcancavel: boolean;
+  etapa?: 'tunnel' | 'credenciais' | 'token' | 'endpoint';
+  http_status?: number;
+  tempo_ms?: number;
+  corpo_preview?: string;
+  erro?: string;
+}
+
 export interface TunnelHealth {
   cnpj: string;
   status: string;
@@ -81,6 +91,8 @@ export interface TunnelPorta {
   protocolo: string;
   principal: boolean;
   aplicacao?: 'giro_web' | 'petshop_web';
+  // Fase 6g — qual API Delphi esta porta representa (casa com releases.produto)
+  produto?: 'mvc_logidoc' | 'petshop_api' | 'logidoc_api_rest';
   cf_tunnel_id: string | null;
   backend_url: string | null;
   ativo: boolean;
@@ -93,9 +105,30 @@ export interface TunnelPorta {
   machine_id?: string | null;
   versao_atual?: string | null;
   versao_reportada_em?: string | null;
+  // Fase 3 — atualização agendada
+  versao_alvo?: string | null;
+  atualizacao_janela_inicio?: string | null;
+  atualizacao_janela_fim?: string | null;
+  atualizacao_tentativas_falhas?: number;
+  atualizacao_status?: string | null;
+  atualizacao_ultima_tentativa?: string | null;
   // health (só presente no endpoint /health)
   status?: string;
   connections?: number;
+}
+
+// Painel de atualização em massa — linha de tunnel_portas com dados da empresa
+export interface PortaAdmin extends TunnelPorta {
+  cnpj: string;
+  razao_social: string;
+  empresa_ativa: boolean;
+}
+
+export interface ResultadoAgendamentoLote {
+  porta_id: number;
+  ok: boolean;
+  janela?: string;
+  erro?: string;
 }
 
 export interface Dispositivo {
@@ -119,7 +152,33 @@ export interface SecurityAlert {
 
 export interface Release {
   id: number;
+  produto: 'mvc_logidoc' | 'petshop_api' | 'logidoc_api_rest';
   versao: string;
+  changelog: string | null;
+  arquivo_nome: string;
+  arquivo_tamanho: number;
+  sha256: string;
+  created_at: string;
+  criado_por_nome: string | null;
+}
+
+export interface PerfilProvisionamento {
+  cnpj: string;
+  firebird_host: string | null;
+  firebird_caminho_fdb: string | null;
+  firebird_usuario: string | null;
+  firebird_senha: string | null;
+  licenca: string | null;
+  cod_filial_padrao: string | null;
+  observacoes: string | null;
+  updated_at: string;
+}
+
+export interface Pacote {
+  id: number;
+  componente: 'mvc_logidoc' | 'cloudflared' | 'monitor_dashboard_web' | 'petshop_api' | 'logidoc_api_rest';
+  versao: string;
+  arquitetura: string;
   changelog: string | null;
   arquivo_nome: string;
   arquivo_tamanho: number;
@@ -202,7 +261,7 @@ export const api = {
   // Portas / Tunnels
   getPortas: (cnpj: string) =>
     req<TunnelPorta[]>(`/empresas/${cnpj}/portas`),
-  adicionarPorta: (cnpj: string, data: { nome: string; porta_local: number; protocolo: string; principal: boolean; aplicacao?: 'giro_web' | 'petshop_web' }) =>
+  adicionarPorta: (cnpj: string, data: { nome: string; porta_local: number; protocolo: string; principal: boolean; aplicacao?: 'giro_web' | 'petshop_web'; produto?: 'mvc_logidoc' | 'petshop_api' | 'logidoc_api_rest' }) =>
     req<TunnelPorta>(`/empresas/${cnpj}/portas`, { method: 'POST', body: JSON.stringify(data) }),
   editarPorta: (cnpj: string, id: number, data: Partial<TunnelPorta>) =>
     req<TunnelPorta>(`/empresas/${cnpj}/portas/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
@@ -210,6 +269,8 @@ export const api = {
     req<{ ok: boolean }>(`/empresas/${cnpj}/portas/${id}`, { method: 'DELETE' }),
   healthPortas: (cnpj: string) =>
     req<TunnelPorta[]>(`/empresas/${cnpj}/portas/health`),
+  testarPorta: (cnpj: string, id: number) =>
+    req<TesteTunnel>(`/empresas/${cnpj}/portas/${id}/testar`),
   criarTunnelPorta: (cnpj: string, id: number) =>
     req<TunnelInfo & { id: number; porta_local: number; nome: string }>(`/empresas/${cnpj}/portas/${id}/tunnel`, { method: 'POST' }),
   removerTunnelPorta: (cnpj: string, id: number) =>
@@ -217,7 +278,7 @@ export const api = {
   getInstalar: (cnpj: string, id: number) =>
     req<{ nome: string; porta_local: number; backend_url: string; instalar_windows: string; instalar_linux: string; desinstalar: string }>(`/empresas/${cnpj}/portas/${id}/instalar`),
   gerarSetupToken: (cnpj: string, id: number, machine_id?: string) =>
-    req<{ ok: boolean; setup_token: string; porta_nome: string; expira_em_minutos: number; travado_ao_equipamento: boolean; aviso: string }>(
+    req<{ ok: boolean; setup_token: string; pairing_code: string; porta_nome: string; expira_em_minutos: number; travado_ao_equipamento: boolean; aviso: string }>(
       `/empresas/${cnpj}/portas/${id}/setup-token`,
       { method: 'POST', body: JSON.stringify(machine_id ? { machine_id } : {}) }
     ),
@@ -229,8 +290,36 @@ export const api = {
     req<TunnelPorta>(`/empresas/${cnpj}/portas/${id}`, { method: 'PUT', body: JSON.stringify({ api_usuario, api_senha }) }),
   regenerarApiKey: (cnpj: string, id: number) =>
     req<{ ok: boolean; api_key: string }>(`/empresas/${cnpj}/portas/${id}/regenerar-api-key`, { method: 'POST' }),
+  definirVersaoAlvo: (cnpj: string, id: number, versao_alvo: string, janelaInicio: string, janelaFim: string) =>
+    req<{ ok: boolean }>(`/empresas/${cnpj}/portas/${id}/versao-alvo`, {
+      method: 'PUT',
+      body: JSON.stringify({ versao_alvo, atualizacao_janela_inicio: janelaInicio, atualizacao_janela_fim: janelaFim }),
+    }),
   limparMaquina: (cnpj: string, id: number) =>
     req<{ ok: boolean }>(`/empresas/${cnpj}/portas/${id}/machine`, { method: 'DELETE' }),
+
+  // Painel de atualização em massa
+  getTodasPortas: () => req<PortaAdmin[]>('/admin/portas'),
+  agendarAtualizacaoLote: (data: {
+    porta_ids: number[];
+    versao_alvo: string;
+    atualizacao_janela_inicio: string;
+    atualizacao_janela_fim: string;
+    tamanho_lote?: number;
+  }) =>
+    req<{ ok: boolean; resultados: ResultadoAgendamentoLote[] }>('/admin/portas/atualizacao-lote', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  // Fase 6a — perfil de provisionamento (dados client-specific p/ instalação automatizada futura)
+  getPerfilProvisionamento: (cnpj: string) =>
+    req<PerfilProvisionamento | null>(`/empresas/${cnpj}/perfil-provisionamento`),
+  salvarPerfilProvisionamento: (cnpj: string, data: Partial<PerfilProvisionamento>) =>
+    req<{ ok: boolean; perfil: PerfilProvisionamento }>(`/empresas/${cnpj}/perfil-provisionamento`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
   getTunnelsHealth: () => req<TunnelHealth[]>('/admin/tunnels-health'),
 
   getInstallerKey: async (): Promise<{ api_key: string }> => req('/admin/installer-key'),
@@ -270,9 +359,10 @@ export const api = {
 
   // Releases (Fase 2 — catálogo de versões do MVC_LOGIDOC)
   getReleases: () => req<Release[]>('/admin/releases'),
-  uploadRelease: async (versao: string, changelog: string, arquivo: File): Promise<{ ok: boolean; release: Release }> => {
+  uploadRelease: async (produto: string, versao: string, changelog: string, arquivo: File): Promise<{ ok: boolean; release: Release }> => {
     const token = getToken();
     const form = new FormData();
+    form.append('produto', produto);
     form.append('versao', versao);
     form.append('changelog', changelog);
     form.append('arquivo', arquivo);
@@ -303,6 +393,44 @@ export const api = {
   },
   removerRelease: (id: number) =>
     req<{ ok: boolean }>(`/admin/releases/${id}`, { method: 'DELETE' }),
+
+  // Pacotes de instalação (Fase 6b — exe+DLLs+certificados, cloudflared, etc.)
+  getPacotes: () => req<Pacote[]>('/admin/pacotes'),
+  uploadPacote: async (componente: string, versao: string, arquitetura: string, changelog: string, arquivo: File): Promise<{ ok: boolean; pacote: Pacote }> => {
+    const token = getToken();
+    const form = new FormData();
+    form.append('componente', componente);
+    form.append('versao', versao);
+    form.append('arquitetura', arquitetura);
+    form.append('changelog', changelog);
+    form.append('arquivo', arquivo);
+    const res = await fetch(`${BASE_URL}/admin/pacotes`, {
+      method: 'POST',
+      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: form,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error((data as Record<string, string>).erro || `Erro ${res.status}`);
+    return data as { ok: boolean; pacote: Pacote };
+  },
+  baixarPacote: async (id: number, nomeArquivo: string): Promise<void> => {
+    const token = getToken();
+    const res = await fetch(`${BASE_URL}/admin/pacotes/${id}/download`, {
+      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error((data as Record<string, string>).erro || `Erro ${res.status}`);
+    }
+    const blob = await res.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = nomeArquivo;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  },
+  removerPacote: (id: number) =>
+    req<{ ok: boolean }>(`/admin/pacotes/${id}`, { method: 'DELETE' }),
 
   // Usuários
   getUsuarios: () => req<UsuarioAdmin[]>('/usuarios'),
