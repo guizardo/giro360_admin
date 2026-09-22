@@ -367,9 +367,10 @@ export default function EmpresasPage() {
     finally { setSalvando(false); }
   }
 
-  // Sugere porta_local/protocolo/aplicacao/principal com base na aplicação
-  // escolhida — agiliza o cadastro pros casos mais comuns, sem travar edição
-  // manual depois. "petshop_multicanal" grava produto='petshop_api' igual ao
+  // Sugere nome/porta_local/protocolo/aplicacao/principal com base na
+  // aplicação escolhida — agiliza o cadastro pros casos mais comuns, sem
+  // travar edição manual depois (o campo "Nome do serviço" continua editável,
+  // é só um ponto de partida). "petshop_multicanal" grava produto='petshop_api' igual ao
   // preset "PetShop_API" — são a mesma coisa pro banco, só a sugestão muda,
   // pra caber lado a lado com uma porta web-only já em produção sem risco de
   // alguém repetir a porta/protocolo errados na hora de cadastrar.
@@ -380,15 +381,16 @@ export default function EmpresasPage() {
       return;
     }
     const SUGESTOES: Record<'mvc_logidoc' | 'petshop_api' | 'petshop_multicanal' | 'logidoc_api_rest',
-      { porta: string; aplicacao: 'giro_web' | 'petshop_web'; protocolo: string; produto: 'mvc_logidoc' | 'petshop_api' | 'logidoc_api_rest' }> = {
-      mvc_logidoc:         { porta: '8082', aplicacao: 'giro_web',    protocolo: 'http',  produto: 'mvc_logidoc' },
-      petshop_api:         { porta: '8090', aplicacao: 'petshop_web', protocolo: 'http',  produto: 'petshop_api' },
-      petshop_multicanal:  { porta: '8075', aplicacao: 'petshop_web', protocolo: 'https', produto: 'petshop_api' },
-      logidoc_api_rest:    { porta: '8085', aplicacao: 'giro_web',    protocolo: 'http',  produto: 'logidoc_api_rest' },
+      { porta: string; aplicacao: 'giro_web' | 'petshop_web'; protocolo: string; produto: 'mvc_logidoc' | 'petshop_api' | 'logidoc_api_rest'; nome: string }> = {
+      mvc_logidoc:         { porta: '8082', aplicacao: 'giro_web',    protocolo: 'http',  produto: 'mvc_logidoc',      nome: 'API Delphi' },
+      petshop_api:         { porta: '8090', aplicacao: 'petshop_web', protocolo: 'http',  produto: 'petshop_api',      nome: 'PetShop_API' },
+      petshop_multicanal:  { porta: '8075', aplicacao: 'petshop_web', protocolo: 'https', produto: 'petshop_api',      nome: 'PetShop Web (multicanal)' },
+      logidoc_api_rest:    { porta: '8085', aplicacao: 'giro_web',    protocolo: 'http',  produto: 'logidoc_api_rest', nome: 'LogiDoc_API_REST' },
     };
     const s = SUGESTOES[app];
     setFormPorta(f => ({
       ...f,
+      nome: s.nome,
       produto: s.produto,
       porta_local: portaEditando ? f.porta_local : s.porta,
       protocolo: s.protocolo,
@@ -1021,12 +1023,22 @@ export default function EmpresasPage() {
                   <select value={formPorta.protocolo} onChange={e => setFormPorta(f => ({ ...f, protocolo: e.target.value }))}
                     className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
                     <option value="http">HTTP</option>
-                    <option value="https">HTTPS (cert. autoassinado)</option>
+                    <option value="https">HTTPS (túnel → localhost)</option>
                     <option value="tcp">TCP</option>
                     <option value="ssh">SSH</option>
                   </select>
                 </div>
               </div>
+              {formPorta.protocolo === 'https' && (
+                <p className="text-xs text-gray-400 -mt-1.5">
+                  Só afeta a ligação interna do Cloudflare Tunnel até <code>localhost</code> nesta
+                  máquina (aceita o certificado autoassinado do servidor local, <code>noTLSVerify</code>) —
+                  quem acessa pela internet sempre vê o certificado oficial da Cloudflare em{' '}
+                  <code>https://...logidoc.work</code>. O acesso HTTPS direto pela rede local (sem passar
+                  pelo túnel) usa outro certificado, real e emitido automaticamente via Let&apos;s Encrypt
+                  (Cloudflare DNS-01) — não depende desta opção.
+                </p>
+              )}
               <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
                 <input type="checkbox" checked={formPorta.principal}
                   onChange={e => setFormPorta(f => ({ ...f, principal: e.target.checked }))}
