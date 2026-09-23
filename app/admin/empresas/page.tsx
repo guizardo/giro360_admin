@@ -367,6 +367,21 @@ export default function EmpresasPage() {
     finally { setSalvando(false); }
   }
 
+  // "ativo" já existia no banco (default true) mas não tinha toggle nenhum na
+  // UI — o CloudflaredService (painel de instalação guiada) passa a usar
+  // esse mesmo campo pra saber "este produto é necessário pra esse cliente".
+  // Não precisa de tunnel pra alternar (diferente de testar/remover tunnel).
+  async function alternarAtivoPorta(porta: TunnelPorta) {
+    if (!empresaSel) return;
+    setSalvando(true);
+    try {
+      await api.editarPorta(empresaSel.cnpj, porta.id, { ativo: !porta.ativo });
+      const rows = await api.getPortas(empresaSel.cnpj);
+      setPortas(rows);
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : 'Erro.'); }
+    finally { setSalvando(false); }
+  }
+
   // Sugere nome/porta_local/protocolo/aplicacao/principal com base na
   // aplicação escolhida — agiliza o cadastro pros casos mais comuns, sem
   // travar edição manual depois (o campo "Nome do serviço" continua editável,
@@ -923,6 +938,15 @@ export default function EmpresasPage() {
                           <button onClick={() => abrirEditarPorta(p)}
                             className="px-2.5 py-1 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors whitespace-nowrap">
                             ✏ Editar
+                          </button>
+                          <button onClick={() => alternarAtivoPorta(p)} disabled={salvando}
+                            title="Controla se o CloudflaredService considera este produto necessário pra este cliente"
+                            className={`px-2.5 py-1 text-xs rounded transition-colors disabled:opacity-50 whitespace-nowrap ${
+                              p.ativo
+                                ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                                : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                            }`}>
+                            {p.ativo ? '🔌 Habilitado' : '🔌 Desabilitado'}
                           </button>
                           {!p.cf_tunnel_id ? (
                             <button onClick={() => criarTunnelPorta(p)} disabled={salvando}
