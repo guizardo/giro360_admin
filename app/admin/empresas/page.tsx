@@ -384,7 +384,15 @@ export default function EmpresasPage() {
       { porta: string; aplicacao: 'giro_web' | 'petshop_web'; protocolo: string; produto: 'mvc_logidoc' | 'petshop_api' | 'logidoc_api_rest'; nome: string }> = {
       mvc_logidoc:         { porta: '8082', aplicacao: 'giro_web',    protocolo: 'http',  produto: 'mvc_logidoc',      nome: 'API Delphi' },
       petshop_api:         { porta: '8090', aplicacao: 'petshop_web', protocolo: 'http',  produto: 'petshop_api',      nome: 'PetShop_API' },
-      petshop_multicanal:  { porta: '8075', aplicacao: 'petshop_web', protocolo: 'https', produto: 'petshop_api',      nome: 'PetShop Web (multicanal)' },
+      // protocolo='http': o PetShop_API.exe não sabe servir HTTPS de verdade
+      // (o código de TLS existe no fonte mas nunca foi ligado ao listener --
+      // é morto). 'https' aqui fazia o cloudflared tentar falar TLS com uma
+      // origem que só entende HTTP puro, e o túnel travava sem resposta
+      // nenhuma -- descoberto depurando um registro de dispositivo que dava
+      // "Servidor da empresa indisponível". O acesso público continua HTTPS
+      // de qualquer forma (o Cloudflare sempre termina TLS com o certificado
+      // dele, independente do protocolo usado nesta última milha local).
+      petshop_multicanal:  { porta: '8075', aplicacao: 'petshop_web', protocolo: 'http',  produto: 'petshop_api',      nome: 'PetShop Web (multicanal)' },
       logidoc_api_rest:    { porta: '8085', aplicacao: 'giro_web',    protocolo: 'http',  produto: 'logidoc_api_rest', nome: 'LogiDoc_API_REST' },
     };
     const s = SUGESTOES[app];
@@ -403,7 +411,9 @@ export default function EmpresasPage() {
   // deixar o dropdown "Aplicação" num estado plausível ao abrir a edição;
   // o valor real editado vem de formPorta, não desse mapeamento.
   function presetDaPorta(p: TunnelPorta): 'mvc_logidoc' | 'petshop_api' | 'petshop_multicanal' | 'logidoc_api_rest' | 'outros' {
-    if (p.produto === 'petshop_api') return p.protocolo === 'https' ? 'petshop_multicanal' : 'petshop_api';
+    // Distingue pela porta (8075), não mais pelo protocolo -- os dois presets
+    // agora gravam protocolo='http' (ver comentário na SUGESTOES acima).
+    if (p.produto === 'petshop_api') return p.porta_local === 8075 ? 'petshop_multicanal' : 'petshop_api';
     if (p.produto === 'logidoc_api_rest') return 'logidoc_api_rest';
     if (p.produto === 'mvc_logidoc' && p.aplicacao === 'giro_web') return 'mvc_logidoc';
     return 'outros';
@@ -999,7 +1009,7 @@ export default function EmpresasPage() {
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
                   <option value="mvc_logidoc">MVC_LOGIDOC</option>
                   <option value="petshop_api">PetShop_API</option>
-                  <option value="petshop_multicanal">PetShop Multicanal (local + web, HTTPS)</option>
+                  <option value="petshop_multicanal">PetShop Multicanal (local + web)</option>
                   <option value="logidoc_api_rest">LogiDoc_API_REST</option>
                   <option value="outros">Outros (VNC, RDP, etc.)</option>
                 </select>
