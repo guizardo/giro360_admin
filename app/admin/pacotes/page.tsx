@@ -9,6 +9,7 @@ const COMPONENTE_LABEL: Record<string, string> = {
   petshop_api: 'PetShop_API',
   logidoc_api_rest: 'LogiDoc_API_REST',
   petshop_web: 'PetShop_Web',
+  monitor_giro: 'MonitorGiro',
 };
 
 // Mesmos valores que TInstaladorAutomatico.DetectarArquiteturaWindows gera no
@@ -42,7 +43,7 @@ export default function PacotesPage() {
   const [erro, setErro]         = useState('');
   const [busca, setBusca]       = useState('');
   const [modal, setModal]       = useState<null | 'upload' | 'excluir'>(null);
-  const [formComponente, setFormComponente] = useState<'mvc_logidoc' | 'cloudflared' | 'monitor_dashboard_web' | 'petshop_api' | 'logidoc_api_rest' | 'petshop_web'>('mvc_logidoc');
+  const [formComponente, setFormComponente] = useState<'mvc_logidoc' | 'cloudflared' | 'monitor_dashboard_web' | 'petshop_api' | 'logidoc_api_rest' | 'petshop_web' | 'monitor_giro'>('mvc_logidoc');
   const [formVersao, setFormVersao]         = useState('');
   const [formArquitetura, setFormArquitetura] = useState('');
   const [formChangelog, setFormChangelog]   = useState('');
@@ -210,6 +211,7 @@ export default function PacotesPage() {
                   <option value="petshop_api">PetShop_API (exe + DLLs, .zip)</option>
                   <option value="logidoc_api_rest">LogiDoc_API_REST (exe + DLLs, .zip)</option>
                   <option value="petshop_web">PetShop_Web (Node + build Next.js, .zip)</option>
+                  <option value="monitor_giro">MonitorGiro (exe, .zip)</option>
                 </select>
               </div>
               <div className={(formComponente === 'cloudflared' || formComponente === 'petshop_web') ? 'grid grid-cols-2 gap-3' : ''}>
