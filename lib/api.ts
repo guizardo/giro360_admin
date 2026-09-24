@@ -36,6 +36,7 @@ export interface Empresa {
   razao_social: string;
   backend_url: string | null;
   ativo: boolean;
+  giro_habilitado: boolean;
   created_at: string;
   // Tunnel principal (LEFT JOIN tunnel_portas WHERE principal = true)
   porta_id: number | null;
@@ -148,6 +149,24 @@ export interface SecurityAlert {
   ts: string;
   machine_id: string;
   message: string;
+}
+
+export interface TunnelLog {
+  id: string;
+  cnpj: string;
+  razao_social: string | null;
+  machine_id: string;
+  ts: string;
+  level: string;
+  message: string;
+}
+
+export interface TunnelLogsResponse {
+  ok: boolean;
+  total: number;
+  page: number;
+  page_size: number;
+  logs: TunnelLog[];
 }
 
 export interface Release {
@@ -297,6 +316,16 @@ export const api = {
     }),
   limparMaquina: (cnpj: string, id: number) =>
     req<{ ok: boolean }>(`/empresas/${cnpj}/portas/${id}/machine`, { method: 'DELETE' }),
+  getTunnelLogs: (params: { cnpj?: string; data_inicio?: string; data_fim?: string; level?: string; page?: number; page_size?: number }) => {
+    const qs = new URLSearchParams();
+    if (params.cnpj)        qs.set('cnpj', params.cnpj);
+    if (params.data_inicio) qs.set('data_inicio', params.data_inicio);
+    if (params.data_fim)    qs.set('data_fim', params.data_fim);
+    if (params.level)       qs.set('level', params.level);
+    qs.set('page', String(params.page ?? 1));
+    qs.set('page_size', String(params.page_size ?? 50));
+    return req<TunnelLogsResponse>(`/tunnel-logs?${qs.toString()}`);
+  },
 
   // Painel de atualização em massa
   getTodasPortas: () => req<PortaAdmin[]>('/admin/portas'),

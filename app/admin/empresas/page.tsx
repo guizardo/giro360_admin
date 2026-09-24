@@ -82,6 +82,8 @@ export default function EmpresasPage() {
   const [formAgendamento, setFormAgendamento] = useState({ versaoAlvo: '', janelaInicio: '02:00', janelaFim: '04:00' });
   const [agendando, setAgendando]     = useState(false);
   // Fase 6a — perfil de provisionamento
+  const [filtro, setFiltro] = useState('');
+
   const [empresaPerfil, setEmpresaPerfil] = useState<Empresa | null>(null);
   const [formPerfil, setFormPerfil]   = useState({
     firebird_host: '', firebird_caminho_fdb: '', firebird_usuario: '', firebird_senha: '',
@@ -133,6 +135,10 @@ export default function EmpresasPage() {
   }
   async function toggleAtivo(e: Empresa) {
     try { await api.atualizarEmpresa(e.cnpj, { ativo: !e.ativo }); carregar(); }
+    catch (err: unknown) { alert(err instanceof Error ? err.message : 'Erro.'); }
+  }
+  async function toggleGiroHabilitado(e: Empresa) {
+    try { await api.atualizarEmpresa(e.cnpj, { giro_habilitado: !e.giro_habilitado }); carregar(); }
     catch (err: unknown) { alert(err instanceof Error ? err.message : 'Erro.'); }
   }
 
@@ -564,6 +570,12 @@ export default function EmpresasPage() {
   }
 
   const totalAtivos  = empresas.filter(e => e.ativo).length;
+  const filtroNorm   = filtro.trim().toLowerCase();
+  const filtroCnpj   = filtro.replace(/\D/g, '');
+  const empresasFiltradas = filtroNorm === '' ? empresas : empresas.filter(e =>
+    e.razao_social.toLowerCase().includes(filtroNorm)
+    || (filtroCnpj !== '' && e.cnpj.includes(filtroCnpj))
+  );
   // Código de ativação e liberar máquina são, na prática, um conceito por
   // empresa: gerarTunnelConfig no backend sempre resolve a porta principal
   // (ORDER BY principal DESC, id LIMIT 1) — ativar em outra porta não tem efeito.
@@ -575,9 +587,15 @@ export default function EmpresasPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-bold text-gray-900">Empresas / CNPJs</h1>
-          <p className="text-sm text-gray-500 mt-0.5">{totalAtivos} ativa{totalAtivos !== 1 ? 's' : ''} de {empresas.length}</p>
+          <p className="text-sm text-gray-500 mt-0.5">
+            {totalAtivos} ativa{totalAtivos !== 1 ? 's' : ''} de {empresas.length}
+            {filtroNorm !== '' && ` · ${empresasFiltradas.length} exibida${empresasFiltradas.length !== 1 ? 's' : ''}`}
+          </p>
         </div>
         <div className="flex items-center gap-2">
+          <input type="text" value={filtro} onChange={e => setFiltro(e.target.value)}
+            placeholder="Filtrar por nome ou CNPJ..."
+            className="px-3 py-2 border border-gray-300 rounded-lg text-sm w-64 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent" />
           <button onClick={carregarHealth} title="Verificar status de todos os tunnels CF"
             className="px-3 py-2 bg-gray-100 text-gray-600 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors">
             ↺ Status tunnels
@@ -610,7 +628,10 @@ export default function EmpresasPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {empresas.map(e => {
+              {empresasFiltradas.length === 0 && (
+                <tr><td colSpan={4} className="px-4 py-10 text-center text-gray-400 text-sm">Nenhuma empresa encontrada para &quot;{filtro}&quot;.</td></tr>
+              )}
+              {empresasFiltradas.map(e => {
                 const h = tunnelHealth[e.cnpj];
                 const tunnelStatus = e.tunnel_cf_id
                   ? (h ? h.status : 'desconhecido')
@@ -675,6 +696,11 @@ export default function EmpresasPage() {
                         <button onClick={() => toggleAtivo(e)}
                           className={`px-2 py-1 text-xs rounded transition-colors ${e.ativo ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' : 'bg-green-100 text-green-700 hover:bg-green-200'}`}>
                           {e.ativo ? 'Desativar' : 'Ativar'}
+                        </button>
+                        <button onClick={() => toggleGiroHabilitado(e)}
+                          title="Controla se o painel de instalação guiada do CloudflaredService mostra a seção do MonitorGiro para esta empresa"
+                          className={`px-2 py-1 text-xs rounded transition-colors ${e.giro_habilitado ? 'bg-teal-100 text-teal-700 hover:bg-teal-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+                          📊 Giro {e.giro_habilitado ? 'habilitado' : 'desabilitado'}
                         </button>
                         {usuario?.role === 'superadmin' && (
                           <button onClick={() => abrirExcluirEmpresa(e)}
@@ -1111,6 +1137,14 @@ export default function EmpresasPage() {
               sem esperar nenhuma operação terminar. Escolha uma janela de horário em que o cliente
               realmente não usa o sistema.
             </div>
+            {portaAgendar.produto === 'petshop_api' && (
+              <div className="bg-sky-50 border border-sky-200 text-sky-800 text-xs px-3 py-2.5 rounded-lg mb-4">
+                Atualização automática do PetShop_API exige CloudflaredService <strong>1.1.1.26 ou superior</strong> e
+                o serviço <code className="bg-sky-100 px-1 rounded">PetShopAPI</code> instalado na máquina do cliente.
+                Em versões anteriores do CloudflaredService o agendamento fica salvo, mas só é aplicado pelo botão
+                &quot;Atualizar PetShop_API Agora&quot; do instalador.
+              </div>
+            )}
             <div className="space-y-3">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Versão alvo</label>
