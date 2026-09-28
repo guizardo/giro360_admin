@@ -6,6 +6,7 @@ const PRODUTO_LABEL: Record<string, string> = {
   mvc_logidoc: 'MVC_LOGIDOC',
   petshop_api: 'PetShop_API',
   logidoc_api_rest: 'LogiDoc_API_REST',
+  cloudflared_service: 'CloudflaredService',
 };
 
 function formatarTamanho(bytes: number): string {
@@ -20,7 +21,7 @@ export default function VersoesPage() {
   const [erro, setErro]         = useState('');
   const [busca, setBusca]       = useState('');
   const [modal, setModal]       = useState<null | 'upload' | 'excluir'>(null);
-  const [formProduto, setFormProduto] = useState<'mvc_logidoc' | 'petshop_api' | 'logidoc_api_rest'>('mvc_logidoc');
+  const [formProduto, setFormProduto] = useState<'mvc_logidoc' | 'petshop_api' | 'logidoc_api_rest' | 'cloudflared_service'>('mvc_logidoc');
   const [formVersao, setFormVersao]         = useState('');
   const [formChangelog, setFormChangelog]   = useState('');
   const [formArquivo, setFormArquivo]       = useState<File | null>(null);
@@ -183,7 +184,15 @@ export default function VersoesPage() {
                   <option value="mvc_logidoc">MVC_LOGIDOC</option>
                   <option value="petshop_api">PetShop_API</option>
                   <option value="logidoc_api_rest">LogiDoc_API_REST</option>
+                  <option value="cloudflared_service">CloudflaredService</option>
                 </select>
+                {formProduto === 'cloudflared_service' && (
+                  <p className="text-xs text-amber-700 mt-1">
+                    A versão aqui precisa ser igual à <code>CLOUDFLAREDSERVICE_VERSION</code> compilada no exe
+                    (UServiceConfig.pas) — senão o cliente instala, marca falha e bloqueia novas tentativas até reagendar.
+                    Autoatualização só funciona em clientes já na 1.1.1.29 ou superior.
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Versão</label>

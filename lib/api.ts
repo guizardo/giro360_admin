@@ -48,6 +48,20 @@ export interface Empresa {
   // Versao do CloudflaredService instalado no cliente (reportada a partir da 1.1.1.28)
   cloudflared_versao?: string | null;
   cloudflared_versao_em?: string | null;
+  // Autoatualizacao do CloudflaredService (a partir da 1.1.1.29) — agendamento por empresa
+  cloudflared_versao_alvo?: string | null;
+  cloudflared_janela_inicio?: string | null;
+  cloudflared_janela_fim?: string | null;
+  cloudflared_tentativas_falhas?: number | null;
+  cloudflared_atualizacao_status?: 'pendente' | 'concluido' | 'falhou' | null;
+  cloudflared_ultima_tentativa?: string | null;
+}
+
+export interface ResultadoAgendamentoServicoLote {
+  cnpj: string;
+  ok: boolean;
+  janela?: string;
+  erro?: string;
 }
 
 export interface TesteTunnel {
@@ -176,7 +190,7 @@ export interface TunnelLogsResponse {
 
 export interface Release {
   id: number;
-  produto: 'mvc_logidoc' | 'petshop_api' | 'logidoc_api_rest';
+  produto: 'mvc_logidoc' | 'petshop_api' | 'logidoc_api_rest' | 'cloudflared_service';
   versao: string;
   changelog: string | null;
   arquivo_nome: string;
@@ -318,6 +332,23 @@ export const api = {
     req<{ ok: boolean }>(`/empresas/${cnpj}/portas/${id}/versao-alvo`, {
       method: 'PUT',
       body: JSON.stringify({ versao_alvo, atualizacao_janela_inicio: janelaInicio, atualizacao_janela_fim: janelaFim }),
+    }),
+  // Autoatualizacao do proprio CloudflaredService (por empresa)
+  definirVersaoAlvoServico: (cnpj: string, versao_alvo: string, janelaInicio: string, janelaFim: string) =>
+    req<{ ok: boolean }>(`/empresas/${cnpj}/cloudflared/versao-alvo`, {
+      method: 'PUT',
+      body: JSON.stringify({ versao_alvo, atualizacao_janela_inicio: janelaInicio, atualizacao_janela_fim: janelaFim }),
+    }),
+  agendarServicoLote: (data: {
+    cnpjs: string[];
+    versao_alvo: string;
+    atualizacao_janela_inicio: string;
+    atualizacao_janela_fim: string;
+    tamanho_lote?: number;
+  }) =>
+    req<{ ok: boolean; resultados: ResultadoAgendamentoServicoLote[] }>('/admin/empresas/cloudflared-lote', {
+      method: 'PUT',
+      body: JSON.stringify(data),
     }),
   limparMaquina: (cnpj: string, id: number) =>
     req<{ ok: boolean }>(`/empresas/${cnpj}/portas/${id}/machine`, { method: 'DELETE' }),

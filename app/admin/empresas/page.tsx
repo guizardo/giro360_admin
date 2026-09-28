@@ -23,6 +23,23 @@ function compararVersao(a: string, b: string): number {
   return 0;
 }
 
+// Situacao do agendamento de autoatualizacao do CloudflaredService de uma
+// empresa -- null quando nao ha nada pendente (sem alvo ou ja na versao alvo).
+function statusAgendaServico(e: Empresa): { texto: string; cor: string; titulo: string } | null {
+  const alvo = e.cloudflared_versao_alvo;
+  if (!alvo || e.cloudflared_versao === alvo) return null;
+  const falhas = e.cloudflared_tentativas_falhas ?? 0;
+  const janela = `${(e.cloudflared_janela_inicio || '').slice(0, 5)}–${(e.cloudflared_janela_fim || '').slice(0, 5)}`;
+  if (falhas >= 3)
+    return { texto: `v${alvo} pausada (3 falhas)`, cor: 'text-red-600',
+      titulo: 'Autoatualização pausada após 3 falhas — veja o log do cliente e reagende para tentar de novo' };
+  if (falhas > 0)
+    return { texto: `→ v${alvo} · ${falhas}/3 falhas`, cor: 'text-amber-600',
+      titulo: `Agendado para a janela diária ${janela}; a última tentativa falhou` };
+  return { texto: `→ v${alvo} agendado ${janela}`, cor: 'text-violet-600',
+    titulo: `Autoatualização agendada na janela diária ${janela}` };
+}
+
 function formatarCNPJ(digitsRaw: string): string {
   const d = digitsRaw.replace(/\D/g, '').slice(0, 14);
   const p1 = d.slice(0, 2), p2 = d.slice(2, 5), p3 = d.slice(5, 8), p4 = d.slice(8, 12), p5 = d.slice(12, 14);
@@ -43,7 +60,7 @@ const STATUS_COR: Record<string, { dot: string; text: string; label: string }> =
   erro:         { dot: 'bg-red-400',    text: 'text-red-500',    label: 'Erro CF'      },
 };
 
-type Modal = null | 'empresa' | 'portas' | 'nova-porta' | 'instalar' | 'setup-token' | 'credenciais' | 'ini-padrao' | 'excluir-empresa' | 'agendar-atualizacao' | 'perfil-provisionamento';
+type Modal = null | 'empresa' | 'portas' | 'nova-porta' | 'instalar' | 'setup-token' | 'credenciais' | 'ini-padrao' | 'excluir-empresa' | 'agendar-atualizacao' | 'agendar-servico' | 'perfil-provisionamento';
 
 export default function EmpresasPage() {
   const [usuario, setUsuario]         = useState<Usuario | null>(null);
@@ -240,6 +257,31 @@ export default function EmpresasPage() {
       setModal('portas');
       const rows = await api.getPortas(empresaSel.cnpj);
       setPortas(rows);
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : 'Erro.'); }
+    finally { setAgendando(false); }
+  }
+
+  // Autoatualizacao do proprio CloudflaredService -- agendamento por empresa
+  // (um servico por cliente), reusa o mesmo form/estado do agendamento das portas.
+  function abrirAgendamentoServico() {
+    if (!empresaSel) return;
+    setFormAgendamento({
+      versaoAlvo: empresaSel.cloudflared_versao_alvo || '',
+      janelaInicio: (empresaSel.cloudflared_janela_inicio || '02:00').slice(0, 5),
+      janelaFim: (empresaSel.cloudflared_janela_fim || '04:00').slice(0, 5),
+    });
+    setModal('agendar-servico');
+  }
+
+  async function salvarAgendamentoServico() {
+    if (!empresaSel || !formAgendamento.versaoAlvo) return;
+    setAgendando(true);
+    try {
+      await api.definirVersaoAlvoServico(empresaSel.cnpj, formAgendamento.versaoAlvo, formAgendamento.janelaInicio, formAgendamento.janelaFim);
+      const lista = await api.getEmpresas();
+      setEmpresas(lista);
+      setEmpresaSel(lista.find(x => x.cnpj === empresaSel.cnpj) ?? empresaSel);
+      setModal('portas');
     } catch (e: unknown) { alert(e instanceof Error ? e.message : 'Erro.'); }
     finally { setAgendando(false); }
   }
@@ -691,6 +733,10 @@ export default function EmpresasPage() {
                                 ⚙ Serviço v{e.cloudflared_versao}
                                 {desatualizado && <span className="font-medium"> · desatualizado</span>}
                                 {e.cloudflared_versao_em && <span className="text-gray-400"> · {tempoRelativo(e.cloudflared_versao_em)}</span>}
+                                {(() => {
+                                  const st = statusAgendaServico(e);
+                                  return st && <span className={`font-medium ${st.cor}`} title={st.titulo}> · {st.texto}</span>;
+                                })()}
                               </span>
                             );
                           })() : (
@@ -788,8 +834,15 @@ export default function EmpresasPage() {
               <div>
                 <h2 className="text-lg font-bold text-gray-900">Portas & Tunnels CF</h2>
                 <p className="text-sm text-gray-500">{empresaSel.razao_social}</p>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  ⚙ Serviço {empresaSel.cloudflared_versao ? `v${empresaSel.cloudflared_versao}` : 'versão não reportada'}
+                  {(() => {
+                    const st = statusAgendaServico(empresaSel);
+                    return st && <span className={`font-medium ${st.cor}`} title={st.titulo}> · {st.texto}</span>;
+                  })()}
+                </p>
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap justify-end gap-2">
                 <button onClick={() => atualizarHealth(empresaSel.cnpj)}
                   className="px-3 py-1.5 text-xs bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200 transition-colors">
                   {loadingHealth ? '...' : '↺ Health'}
@@ -812,6 +865,11 @@ export default function EmpresasPage() {
                     🖥 Liberar máquina
                   </button>
                 )}
+                <button onClick={abrirAgendamentoServico}
+                  title="Agendar a autoatualização do CloudflaredService desta empresa (versão + janela diária)"
+                  className="px-3 py-1.5 text-xs bg-violet-100 text-violet-700 rounded-lg hover:bg-violet-200 transition-colors">
+                  ⚙ Atualizar serviço
+                </button>
                 <button onClick={() => { setPortaEditando(null); setAplicacaoPorta('mvc_logidoc'); setFormPorta({ nome: 'API Delphi', porta_local: '8082', protocolo: 'http', principal: portas.length === 0, aplicacao: 'giro_web', produto: 'mvc_logidoc' }); setModal('nova-porta'); }}
                   className="px-3 py-1.5 text-xs bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors">
                   + Porta
@@ -1148,6 +1206,76 @@ export default function EmpresasPage() {
                 disabled={salvando || !formPorta.nome || !formPorta.porta_local}
                 className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50">
                 {salvando ? 'Salvando...' : (portaEditando ? 'Salvar alterações' : 'Adicionar')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal Autoatualização do CloudflaredService ─────────── */}
+      {modal === 'agendar-servico' && empresaSel && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
+            <h2 className="text-lg font-bold text-gray-900 mb-1">Atualizar CloudflaredService</h2>
+            <p className="text-sm text-gray-500 mb-1">{empresaSel.razao_social}</p>
+            <p className="text-sm text-gray-500 mb-4">
+              Versão atual: <code className="bg-gray-100 px-1 rounded">{empresaSel.cloudflared_versao || '—'}</code>
+              {empresaSel.cloudflared_versao_alvo && (
+                <> · alvo atual: <code className="bg-gray-100 px-1 rounded">{empresaSel.cloudflared_versao_alvo}</code>
+                  {(empresaSel.cloudflared_tentativas_falhas ?? 0) > 0 && (
+                    <span className="text-amber-600"> ({empresaSel.cloudflared_tentativas_falhas}/3 falhas)</span>
+                  )}
+                </>
+              )}
+            </p>
+            <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs px-3 py-2.5 rounded-lg mb-4">
+              Na troca, o serviço é reiniciado: o tunnel (e o acesso remoto às APIs) fica fora do ar por
+              ~15–30 segundos. Um ajudante confere se a versão nova subiu e, se não subir, volta a anterior sozinho.
+            </div>
+            {empresaSel.cloudflared_versao && compararVersao(empresaSel.cloudflared_versao, '1.1.1.29') < 0 && (
+              <div className="bg-red-50 border border-red-200 text-red-700 text-xs px-3 py-2.5 rounded-lg mb-4">
+                Este cliente está na v{empresaSel.cloudflared_versao}: a autoatualização só existe a partir da
+                <strong> 1.1.1.29</strong>. O agendamento fica salvo, mas a primeira atualização precisa ser manual.
+              </div>
+            )}
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Versão alvo</label>
+                <select value={formAgendamento.versaoAlvo} onChange={e => setFormAgendamento(f => ({ ...f, versaoAlvo: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                  <option value="">Selecione uma versão...</option>
+                  {releases.filter(r => r.produto === 'cloudflared_service').map(r => (
+                    <option key={r.id} value={r.versao}>v{r.versao}{r.changelog ? ` — ${r.changelog.slice(0, 40)}` : ''}</option>
+                  ))}
+                </select>
+                {releases.filter(r => r.produto === 'cloudflared_service').length === 0 && (
+                  <p className="text-xs text-gray-400 mt-1">Nenhuma versão do CloudflaredService publicada — envie em Versões.</p>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Janela — início</label>
+                  <input type="time" value={formAgendamento.janelaInicio}
+                    onChange={e => setFormAgendamento(f => ({ ...f, janelaInicio: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Janela — fim</label>
+                  <input type="time" value={formAgendamento.janelaFim}
+                    onChange={e => setFormAgendamento(f => ({ ...f, janelaFim: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                </div>
+              </div>
+              <p className="text-xs text-gray-400">
+                Todo dia, dentro dessa janela, o serviço tenta se atualizar até conseguir. Depois de 3 tentativas
+                falhas ele para sozinho e espera você reagendar (reagendar zera o contador).
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 mt-5">
+              <button onClick={() => setModal('portas')} className="px-4 py-2 text-sm text-gray-600">Cancelar</button>
+              <button onClick={salvarAgendamentoServico} disabled={agendando || !formAgendamento.versaoAlvo}
+                className="px-4 py-2 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700 disabled:opacity-50">
+                {agendando ? 'Agendando...' : 'Agendar'}
               </button>
             </div>
           </div>
