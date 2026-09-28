@@ -333,6 +333,10 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ versao_alvo, atualizacao_janela_inicio: janelaInicio, atualizacao_janela_fim: janelaFim }),
     }),
+  cancelarVersaoAlvo: (cnpj: string, id: number) =>
+    req<{ ok: boolean }>(`/empresas/${cnpj}/portas/${id}/versao-alvo`, { method: 'DELETE' }),
+  cancelarVersaoAlvoServico: (cnpj: string) =>
+    req<{ ok: boolean }>(`/empresas/${cnpj}/cloudflared/versao-alvo`, { method: 'DELETE' }),
   // Autoatualizacao do proprio CloudflaredService (por empresa)
   definirVersaoAlvoServico: (cnpj: string, versao_alvo: string, janelaInicio: string, janelaFim: string) =>
     req<{ ok: boolean }>(`/empresas/${cnpj}/cloudflared/versao-alvo`, {

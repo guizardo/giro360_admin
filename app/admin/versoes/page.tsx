@@ -190,7 +190,7 @@ export default function VersoesPage() {
                   <p className="text-xs text-amber-700 mt-1">
                     A versão aqui precisa ser igual à <code>CLOUDFLAREDSERVICE_VERSION</code> compilada no exe
                     (UServiceConfig.pas) — senão o cliente instala, marca falha e bloqueia novas tentativas até reagendar.
-                    Autoatualização só funciona em clientes já na 1.1.1.29 ou superior.
+                    Autoatualização só funciona em clientes já na 1.1.1.31 ou superior.
                   </p>
                 )}
               </div>

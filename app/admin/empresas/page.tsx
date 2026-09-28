@@ -286,6 +286,32 @@ export default function EmpresasPage() {
     finally { setAgendando(false); }
   }
 
+  async function cancelarAgendamento() {
+    if (!empresaSel || !portaAgendar) return;
+    if (!confirm(`Cancelar o agendamento de atualização da porta "${portaAgendar.nome}"?`)) return;
+    setAgendando(true);
+    try {
+      await api.cancelarVersaoAlvo(empresaSel.cnpj, portaAgendar.id);
+      setModal('portas');
+      setPortas(await api.getPortas(empresaSel.cnpj));
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : 'Erro.'); }
+    finally { setAgendando(false); }
+  }
+
+  async function cancelarAgendamentoServico() {
+    if (!empresaSel) return;
+    if (!confirm('Cancelar o agendamento de atualização do CloudflaredService desta empresa?')) return;
+    setAgendando(true);
+    try {
+      await api.cancelarVersaoAlvoServico(empresaSel.cnpj);
+      const lista = await api.getEmpresas();
+      setEmpresas(lista);
+      setEmpresaSel(lista.find(x => x.cnpj === empresaSel.cnpj) ?? empresaSel);
+      setModal('portas');
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : 'Erro.'); }
+    finally { setAgendando(false); }
+  }
+
   async function testarPorta(porta: TunnelPorta) {
     if (!empresaSel) return;
     setTestando(t => ({ ...t, [porta.id]: true }));
@@ -1232,10 +1258,10 @@ export default function EmpresasPage() {
               Na troca, o serviço é reiniciado: o tunnel (e o acesso remoto às APIs) fica fora do ar por
               ~15–30 segundos. Um ajudante confere se a versão nova subiu e, se não subir, volta a anterior sozinho.
             </div>
-            {empresaSel.cloudflared_versao && compararVersao(empresaSel.cloudflared_versao, '1.1.1.29') < 0 && (
+            {empresaSel.cloudflared_versao && compararVersao(empresaSel.cloudflared_versao, '1.1.1.31') < 0 && (
               <div className="bg-red-50 border border-red-200 text-red-700 text-xs px-3 py-2.5 rounded-lg mb-4">
                 Este cliente está na v{empresaSel.cloudflared_versao}: a autoatualização só existe a partir da
-                <strong> 1.1.1.29</strong>. O agendamento fica salvo, mas a primeira atualização precisa ser manual.
+                <strong> 1.1.1.31</strong>. O agendamento fica salvo, mas a primeira atualização precisa ser manual.
               </div>
             )}
             <div className="space-y-3">
@@ -1272,7 +1298,14 @@ export default function EmpresasPage() {
               </p>
             </div>
             <div className="flex justify-end gap-2 mt-5">
-              <button onClick={() => setModal('portas')} className="px-4 py-2 text-sm text-gray-600">Cancelar</button>
+              {empresaSel.cloudflared_versao_alvo && (
+                <button onClick={cancelarAgendamentoServico} disabled={agendando}
+                  title="Remove a versão alvo e a janela — o serviço para de tentar a partir da próxima sincronização (reinício ou ~1h)"
+                  className="mr-auto px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50">
+                  Cancelar agendamento
+                </button>
+              )}
+              <button onClick={() => setModal('portas')} className="px-4 py-2 text-sm text-gray-600">Fechar</button>
               <button onClick={salvarAgendamentoServico} disabled={agendando || !formAgendamento.versaoAlvo}
                 className="px-4 py-2 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700 disabled:opacity-50">
                 {agendando ? 'Agendando...' : 'Agendar'}
@@ -1334,7 +1367,14 @@ export default function EmpresasPage() {
               </p>
             </div>
             <div className="flex justify-end gap-2 mt-5">
-              <button onClick={() => setModal('portas')} className="px-4 py-2 text-sm text-gray-600">Cancelar</button>
+              {portaAgendar.versao_alvo && (
+                <button onClick={cancelarAgendamento} disabled={agendando}
+                  title="Remove a versão alvo e a janela — o CloudflaredService para de tentar a partir da próxima sincronização (reinício ou ~1h)"
+                  className="mr-auto px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50">
+                  Cancelar agendamento
+                </button>
+              )}
+              <button onClick={() => setModal('portas')} className="px-4 py-2 text-sm text-gray-600">Fechar</button>
               <button onClick={salvarAgendamento} disabled={agendando || !formAgendamento.versaoAlvo}
                 className="px-4 py-2 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700 disabled:opacity-50">
                 {agendando ? 'Agendando...' : 'Agendar'}

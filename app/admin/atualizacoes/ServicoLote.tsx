@@ -6,8 +6,9 @@ import { api, type Empresa, type Release, type ResultadoAgendamentoServicoLote }
 // empresa (nao por porta), por isso lista empresas em vez de portas.
 
 // Primeira versao com autoatualizacao -- abaixo disso o agendamento fica salvo
-// mas nao e' aplicado (a troca pra 1.1.1.29 precisa ser manual).
-const VERSAO_MINIMA_AUTOUPDATE = '1.1.1.29';
+// mas nao e' aplicado (a troca pra 1.1.1.31 precisa ser manual). 1.1.1.29/30
+// tinham o ajudante com o nome do servico errado e nunca conseguiam reiniciar.
+const VERSAO_MINIMA_AUTOUPDATE = '1.1.1.31';
 
 function compararVersao(a: string, b: string): number {
   const pa = a.split('.').map(n => parseInt(n, 10) || 0);
