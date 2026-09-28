@@ -262,6 +262,11 @@ export default function AtualizacoesPage() {
                     ) : (
                       <span className="text-xs text-gray-300 italic">não configurado</span>
                     )}
+                    {/* Versão do CloudflaredService do cliente — quem aplica o agendamento */}
+                    <span className={`block text-xs mt-0.5 ${p.cloudflared_versao ? 'text-gray-500' : 'text-gray-300'}`}
+                      title="Versão do CloudflaredService (reportada a partir da 1.1.1.28)">
+                      ⚙ {p.cloudflared_versao ? `Serviço v${p.cloudflared_versao}` : 'Serviço: versão não reportada'}
+                    </span>
                   </td>
                   <td className="px-4 py-3">
                     {p.versao_atual ? (

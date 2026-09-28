@@ -45,6 +45,9 @@ export interface Empresa {
   tunnel_machine_id: string | null;
   tunnel_backend_url: string | null;
   tunnel_ativo: boolean | null;
+  // Versao do CloudflaredService instalado no cliente (reportada a partir da 1.1.1.28)
+  cloudflared_versao?: string | null;
+  cloudflared_versao_em?: string | null;
 }
 
 export interface TesteTunnel {
@@ -123,6 +126,8 @@ export interface PortaAdmin extends TunnelPorta {
   cnpj: string;
   razao_social: string;
   empresa_ativa: boolean;
+  cloudflared_versao?: string | null;
+  cloudflared_versao_em?: string | null;
 }
 
 export interface ResultadoAgendamentoLote {

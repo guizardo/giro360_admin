@@ -12,6 +12,17 @@ function gerarSenhaAleatoria(): string {
   return Array.from(bytes).map(b => chars[b % chars.length]).join('');
 }
 
+// Compara versoes numericas "1.1.1.28" parte a parte (string compararia "1.1.1.9" > "1.1.1.28").
+function compararVersao(a: string, b: string): number {
+  const pa = a.split('.').map(n => parseInt(n, 10) || 0);
+  const pb = b.split('.').map(n => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
+
 function formatarCNPJ(digitsRaw: string): string {
   const d = digitsRaw.replace(/\D/g, '').slice(0, 14);
   const p1 = d.slice(0, 2), p2 = d.slice(2, 5), p3 = d.slice(5, 8), p4 = d.slice(8, 12), p5 = d.slice(12, 14);
@@ -580,6 +591,10 @@ export default function EmpresasPage() {
   // empresa: gerarTunnelConfig no backend sempre resolve a porta principal
   // (ORDER BY principal DESC, id LIMIT 1) — ativar em outra porta não tem efeito.
   const portaPrincipal = portas.find(p => p.principal);
+  // Maior versao do CloudflaredService vista entre os clientes -- quem estiver
+  // abaixo dela aparece destacado como desatualizado na lista.
+  const versaoServicoMaisRecente = empresas.reduce<string>((max, e) =>
+    e.cloudflared_versao && (max === '' || compararVersao(e.cloudflared_versao, max) > 0) ? e.cloudflared_versao : max, '');
 
   return (
     <div className="p-6">
@@ -666,6 +681,21 @@ export default function EmpresasPage() {
                           {e.tunnel_backend_url && (
                             <span className="text-xs text-indigo-500 truncate max-w-[260px]" title={e.tunnel_backend_url}>
                               {e.tunnel_backend_url}
+                            </span>
+                          )}
+                          {e.cloudflared_versao ? (() => {
+                            const desatualizado = versaoServicoMaisRecente !== '' && compararVersao(e.cloudflared_versao, versaoServicoMaisRecente) < 0;
+                            return (
+                              <span className={`text-xs ${desatualizado ? 'text-amber-600' : 'text-gray-500'}`}
+                                title={desatualizado ? `Versão mais recente em uso: ${versaoServicoMaisRecente}` : 'Versão do CloudflaredService instalado no cliente'}>
+                                ⚙ Serviço v{e.cloudflared_versao}
+                                {desatualizado && <span className="font-medium"> · desatualizado</span>}
+                                {e.cloudflared_versao_em && <span className="text-gray-400"> · {tempoRelativo(e.cloudflared_versao_em)}</span>}
+                              </span>
+                            );
+                          })() : (
+                            <span className="text-xs text-gray-300" title="O CloudflaredService só reporta a própria versão a partir da 1.1.1.28">
+                              ⚙ Serviço: versão não reportada
                             </span>
                           )}
                         </div>
