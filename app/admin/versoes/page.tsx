@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { api, getUsuario, type Release, type Usuario } from '@/lib/api';
+import { lerVersaoExe } from '@/lib/exeVersion';
 
 const PRODUTO_LABEL: Record<string, string> = {
   mvc_logidoc: 'MVC_LOGIDOC',
@@ -25,6 +26,10 @@ export default function VersoesPage() {
   const [formVersao, setFormVersao]         = useState('');
   const [formChangelog, setFormChangelog]   = useState('');
   const [formArquivo, setFormArquivo]       = useState<File | null>(null);
+  // Versao lida do proprio exe (FileVersion) -- quando existe, o campo fica
+  // travado nela; o backend recusa upload com versao diferente da do exe.
+  const [versaoDoExe, setVersaoDoExe]       = useState<string | null>(null);
+  const [lendoExe, setLendoExe]             = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [baixando, setBaixando] = useState<number | null>(null);
   const [excluir, setExcluir]   = useState<Release | null>(null);
@@ -46,7 +51,21 @@ export default function VersoesPage() {
 
   function abrirUpload() {
     setFormProduto('mvc_logidoc'); setFormVersao(''); setFormChangelog(''); setFormArquivo(null);
+    setVersaoDoExe(null);
     setModal('upload');
+  }
+
+  async function escolherArquivo(arquivo: File | null) {
+    setFormArquivo(arquivo);
+    setVersaoDoExe(null);
+    if (!arquivo) return;
+    setLendoExe(true);
+    try {
+      const v = await lerVersaoExe(arquivo);
+      setVersaoDoExe(v);
+      if (v) setFormVersao(v);
+    } catch { /* sem versao legivel -- fica o campo manual */ }
+    finally { setLendoExe(false); }
   }
 
   async function enviarRelease() {
@@ -188,17 +207,30 @@ export default function VersoesPage() {
                 </select>
                 {formProduto === 'cloudflared_service' && (
                   <p className="text-xs text-amber-700 mt-1">
-                    A versão aqui precisa ser igual à <code>CLOUDFLAREDSERVICE_VERSION</code> compilada no exe
-                    (UServiceConfig.pas) — senão o cliente instala, marca falha e bloqueia novas tentativas até reagendar.
                     Autoatualização só funciona em clientes já na 1.1.1.31 ou superior.
                   </p>
                 )}
               </div>
               <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Arquivo (.exe)</label>
+                <input type="file" onChange={e => escolherArquivo(e.target.files?.[0] || null)}
+                  className="w-full text-sm text-gray-600" />
+              </div>
+              <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Versão</label>
                 <input value={formVersao} onChange={e => setFormVersao(e.target.value)}
-                  placeholder="1.2.3.7"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                  readOnly={!!versaoDoExe}
+                  placeholder={lendoExe ? 'Lendo versão do executável...' : '1.2.3.7'}
+                  className={`w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 ${versaoDoExe ? 'bg-gray-50 text-gray-700' : ''}`} />
+                {versaoDoExe ? (
+                  <p className="text-xs text-green-700 mt-1">
+                    ✓ Lida do executável (Propriedades › Detalhes). Para mudar, altere a versão no projeto e recompile.
+                  </p>
+                ) : formArquivo && !lendoExe ? (
+                  <p className="text-xs text-amber-700 mt-1">
+                    O arquivo não tem versão embutida — digite a versão manualmente.
+                  </p>
+                ) : null}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Changelog (opcional)</label>
@@ -206,15 +238,10 @@ export default function VersoesPage() {
                   rows={3}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Arquivo (.exe)</label>
-                <input type="file" onChange={e => setFormArquivo(e.target.files?.[0] || null)}
-                  className="w-full text-sm text-gray-600" />
-              </div>
             </div>
             <div className="flex justify-end gap-2 mt-5">
               <button onClick={() => setModal(null)} className="px-4 py-2 text-sm text-gray-600">Cancelar</button>
-              <button onClick={enviarRelease} disabled={enviando || !formVersao.trim() || !formArquivo}
+              <button onClick={enviarRelease} disabled={enviando || lendoExe || !formVersao.trim() || !formArquivo}
                 className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50">
                 {enviando ? 'Enviando...' : 'Enviar'}
               </button>
