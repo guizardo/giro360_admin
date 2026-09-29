@@ -55,7 +55,18 @@ export interface Empresa {
   cloudflared_tentativas_falhas?: number | null;
   cloudflared_atualizacao_status?: 'pendente' | 'concluido' | 'falhou' | null;
   cloudflared_ultima_tentativa?: string | null;
+  // MonitorGiro (por empresa, tabela empresa_produtos) — versão reportada pelo CloudflaredService + agendamento
+  monitor_giro_versao?: string | null;
+  monitor_giro_versao_em?: string | null;
+  monitor_giro_versao_alvo?: string | null;
+  monitor_giro_janela_inicio?: string | null;
+  monitor_giro_janela_fim?: string | null;
+  monitor_giro_tentativas_falhas?: number | null;
+  monitor_giro_atualizacao_status?: 'pendente' | 'concluido' | 'falhou' | null;
 }
+
+// Apps por empresa (sem porta/tunnel) com versão e atualização agendada
+export type ProdutoEmpresa = 'monitor_giro';
 
 export interface ResultadoAgendamentoServicoLote {
   cnpj: string;
@@ -190,7 +201,7 @@ export interface TunnelLogsResponse {
 
 export interface Release {
   id: number;
-  produto: 'mvc_logidoc' | 'petshop_api' | 'logidoc_api_rest' | 'cloudflared_service';
+  produto: 'mvc_logidoc' | 'petshop_api' | 'logidoc_api_rest' | 'cloudflared_service' | 'monitor_giro';
   versao: string;
   changelog: string | null;
   arquivo_nome: string;
@@ -337,6 +348,25 @@ export const api = {
     req<{ ok: boolean }>(`/empresas/${cnpj}/portas/${id}/versao-alvo`, { method: 'DELETE' }),
   cancelarVersaoAlvoServico: (cnpj: string) =>
     req<{ ok: boolean }>(`/empresas/${cnpj}/cloudflared/versao-alvo`, { method: 'DELETE' }),
+  // Apps por empresa (MonitorGiro) — agendamento em empresa_produtos
+  definirVersaoAlvoProdutoEmpresa: (cnpj: string, produto: ProdutoEmpresa, versao_alvo: string, janelaInicio: string, janelaFim: string) =>
+    req<{ ok: boolean }>(`/empresas/${cnpj}/produtos/${produto}/versao-alvo`, {
+      method: 'PUT',
+      body: JSON.stringify({ versao_alvo, atualizacao_janela_inicio: janelaInicio, atualizacao_janela_fim: janelaFim }),
+    }),
+  cancelarVersaoAlvoProdutoEmpresa: (cnpj: string, produto: ProdutoEmpresa) =>
+    req<{ ok: boolean }>(`/empresas/${cnpj}/produtos/${produto}/versao-alvo`, { method: 'DELETE' }),
+  agendarProdutoEmpresaLote: (produto: ProdutoEmpresa, data: {
+    cnpjs: string[];
+    versao_alvo: string;
+    atualizacao_janela_inicio: string;
+    atualizacao_janela_fim: string;
+    tamanho_lote?: number;
+  }) =>
+    req<{ ok: boolean; resultados: ResultadoAgendamentoServicoLote[] }>(`/admin/empresas/produtos/${produto}/lote`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
   // Autoatualizacao do proprio CloudflaredService (por empresa)
   definirVersaoAlvoServico: (cnpj: string, versao_alvo: string, janelaInicio: string, janelaFim: string) =>
     req<{ ok: boolean }>(`/empresas/${cnpj}/cloudflared/versao-alvo`, {

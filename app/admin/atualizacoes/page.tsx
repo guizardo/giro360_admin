@@ -46,7 +46,7 @@ export default function AtualizacoesPage() {
   const [resultadoLote, setResultadoLote] = useState<ResultadoAgendamentoLote[] | null>(null);
 
   // APIs (agendamento por porta) ou o proprio CloudflaredService (por empresa)
-  const [modo, setModo] = useState<'apis' | 'servico'>('apis');
+  const [modo, setModo] = useState<'apis' | 'servico' | 'giro'>('apis');
 
   const carregar = useCallback(async () => {
     setLoading(true);
@@ -154,7 +154,7 @@ export default function AtualizacoesPage() {
 
   const abas = (
     <div className="flex gap-1 mb-5 border-b border-gray-200">
-      {([['apis', '📦 APIs (por porta)'], ['servico', '⚙ CloudflaredService (por empresa)']] as const).map(([k, label]) => (
+      {([['apis', '📦 APIs (por porta)'], ['servico', '⚙ CloudflaredService (por empresa)'], ['giro', '📊 MonitorGiro (por empresa)']] as const).map(([k, label]) => (
         <button key={k} onClick={() => setModo(k)}
           className={`px-4 py-2 text-sm font-medium -mb-px border-b-2 transition-colors ${
             modo === k ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -165,12 +165,12 @@ export default function AtualizacoesPage() {
     </div>
   );
 
-  if (modo === 'servico') {
+  if (modo === 'servico' || modo === 'giro') {
     return (
       <div className="p-6">
         <h1 className="text-xl font-bold text-gray-900 mb-4">Atualizações em massa</h1>
         {abas}
-        <ServicoLote releases={releases} />
+        <ServicoLote key={modo} releases={releases} produto={modo === 'giro' ? 'monitor_giro' : 'cloudflared_service'} />
       </div>
     );
   }

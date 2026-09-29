@@ -8,6 +8,7 @@ const PRODUTO_LABEL: Record<string, string> = {
   petshop_api: 'PetShop_API',
   logidoc_api_rest: 'LogiDoc_API_REST',
   cloudflared_service: 'CloudflaredService',
+  monitor_giro: 'MonitorGiro',
 };
 
 function formatarTamanho(bytes: number): string {
@@ -22,7 +23,7 @@ export default function VersoesPage() {
   const [erro, setErro]         = useState('');
   const [busca, setBusca]       = useState('');
   const [modal, setModal]       = useState<null | 'upload' | 'excluir'>(null);
-  const [formProduto, setFormProduto] = useState<'mvc_logidoc' | 'petshop_api' | 'logidoc_api_rest' | 'cloudflared_service'>('mvc_logidoc');
+  const [formProduto, setFormProduto] = useState<'mvc_logidoc' | 'petshop_api' | 'logidoc_api_rest' | 'cloudflared_service' | 'monitor_giro'>('mvc_logidoc');
   const [formVersao, setFormVersao]         = useState('');
   const [formChangelog, setFormChangelog]   = useState('');
   const [formArquivo, setFormArquivo]       = useState<File | null>(null);
@@ -204,10 +205,17 @@ export default function VersoesPage() {
                   <option value="petshop_api">PetShop_API</option>
                   <option value="logidoc_api_rest">LogiDoc_API_REST</option>
                   <option value="cloudflared_service">CloudflaredService</option>
+                  <option value="monitor_giro">MonitorGiro</option>
                 </select>
                 {formProduto === 'cloudflared_service' && (
                   <p className="text-xs text-amber-700 mt-1">
                     Autoatualização só funciona em clientes já na 1.1.1.31 ou superior.
+                  </p>
+                )}
+                {formProduto === 'monitor_giro' && (
+                  <p className="text-xs text-amber-700 mt-1">
+                    Atualização automática do MonitorGiro exige CloudflaredService 1.1.1.35 ou superior no cliente,
+                    e o MonitorGiro com a trava de execução (a troca espera o giro terminar).
                   </p>
                 )}
               </div>

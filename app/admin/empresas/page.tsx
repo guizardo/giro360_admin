@@ -25,11 +25,22 @@ function compararVersao(a: string, b: string): number {
 
 // Situacao do agendamento de autoatualizacao do CloudflaredService de uma
 // empresa -- null quando nao ha nada pendente (sem alvo ou ja na versao alvo).
-function statusAgendaServico(e: Empresa): { texto: string; cor: string; titulo: string } | null {
-  const alvo = e.cloudflared_versao_alvo;
-  if (!alvo || e.cloudflared_versao === alvo) return null;
-  const falhas = e.cloudflared_tentativas_falhas ?? 0;
-  const janela = `${(e.cloudflared_janela_inicio || '').slice(0, 5)}–${(e.cloudflared_janela_fim || '').slice(0, 5)}`;
+function statusAgendaServico(e: Empresa) {
+  return statusAgenda(e.cloudflared_versao, e.cloudflared_versao_alvo, e.cloudflared_tentativas_falhas,
+    e.cloudflared_janela_inicio, e.cloudflared_janela_fim);
+}
+
+function statusAgendaGiro(e: Empresa) {
+  return statusAgenda(e.monitor_giro_versao, e.monitor_giro_versao_alvo, e.monitor_giro_tentativas_falhas,
+    e.monitor_giro_janela_inicio, e.monitor_giro_janela_fim);
+}
+
+function statusAgenda(versao: string | null | undefined, alvo: string | null | undefined,
+  falhasRaw: number | null | undefined, ini: string | null | undefined, fim: string | null | undefined,
+): { texto: string; cor: string; titulo: string } | null {
+  if (!alvo || versao === alvo) return null;
+  const falhas = falhasRaw ?? 0;
+  const janela = `${(ini || '').slice(0, 5)}–${(fim || '').slice(0, 5)}`;
   if (falhas >= 3)
     return { texto: `v${alvo} pausada (3 falhas)`, cor: 'text-red-600',
       titulo: 'Autoatualização pausada após 3 falhas — veja o log do cliente e reagende para tentar de novo' };
@@ -60,7 +71,7 @@ const STATUS_COR: Record<string, { dot: string; text: string; label: string }> =
   erro:         { dot: 'bg-red-400',    text: 'text-red-500',    label: 'Erro CF'      },
 };
 
-type Modal = null | 'empresa' | 'portas' | 'nova-porta' | 'instalar' | 'setup-token' | 'credenciais' | 'ini-padrao' | 'excluir-empresa' | 'agendar-atualizacao' | 'agendar-servico' | 'perfil-provisionamento';
+type Modal = null | 'empresa' | 'portas' | 'nova-porta' | 'instalar' | 'setup-token' | 'credenciais' | 'ini-padrao' | 'excluir-empresa' | 'agendar-atualizacao' | 'agendar-servico' | 'agendar-giro' | 'perfil-provisionamento';
 
 export default function EmpresasPage() {
   const [usuario, setUsuario]         = useState<Usuario | null>(null);
@@ -307,6 +318,49 @@ export default function EmpresasPage() {
       const lista = await api.getEmpresas();
       setEmpresas(lista);
       setEmpresaSel(lista.find(x => x.cnpj === empresaSel.cnpj) ?? empresaSel);
+      setModal('portas');
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : 'Erro.'); }
+    finally { setAgendando(false); }
+  }
+
+  // MonitorGiro -- agendamento por empresa (empresa_produtos), mesmo form/estado.
+  // Janela padrao fora do processamento noturno (giro 23h, correlacao 4h, sweep 5h).
+  function abrirAgendamentoGiro() {
+    if (!empresaSel) return;
+    setFormAgendamento({
+      versaoAlvo: empresaSel.monitor_giro_versao_alvo || '',
+      janelaInicio: (empresaSel.monitor_giro_janela_inicio || '12:00').slice(0, 5),
+      janelaFim: (empresaSel.monitor_giro_janela_fim || '14:00').slice(0, 5),
+    });
+    setModal('agendar-giro');
+  }
+
+  async function recarregarEmpresaSel() {
+    if (!empresaSel) return;
+    const lista = await api.getEmpresas();
+    setEmpresas(lista);
+    setEmpresaSel(lista.find(x => x.cnpj === empresaSel.cnpj) ?? empresaSel);
+  }
+
+  async function salvarAgendamentoGiro() {
+    if (!empresaSel || !formAgendamento.versaoAlvo) return;
+    setAgendando(true);
+    try {
+      await api.definirVersaoAlvoProdutoEmpresa(empresaSel.cnpj, 'monitor_giro', formAgendamento.versaoAlvo,
+        formAgendamento.janelaInicio, formAgendamento.janelaFim);
+      await recarregarEmpresaSel();
+      setModal('portas');
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : 'Erro.'); }
+    finally { setAgendando(false); }
+  }
+
+  async function cancelarAgendamentoGiro() {
+    if (!empresaSel) return;
+    if (!confirm('Cancelar o agendamento de atualização do MonitorGiro desta empresa?')) return;
+    setAgendando(true);
+    try {
+      await api.cancelarVersaoAlvoProdutoEmpresa(empresaSel.cnpj, 'monitor_giro');
+      await recarregarEmpresaSel();
       setModal('portas');
     } catch (e: unknown) { alert(e instanceof Error ? e.message : 'Erro.'); }
     finally { setAgendando(false); }
@@ -770,6 +824,17 @@ export default function EmpresasPage() {
                               ⚙ Serviço: versão não reportada
                             </span>
                           )}
+                          {e.giro_habilitado && (
+                            <span className={`text-xs ${e.monitor_giro_versao ? 'text-gray-500' : 'text-gray-300'}`}
+                              title="Versão do MonitorGiro instalado no cliente (reportada pelo CloudflaredService 1.1.1.35+)">
+                              📊 MonitorGiro {e.monitor_giro_versao ? `v${e.monitor_giro_versao}` : ': versão não reportada'}
+                              {e.monitor_giro_versao_em && <span className="text-gray-400"> · {tempoRelativo(e.monitor_giro_versao_em)}</span>}
+                              {(() => {
+                                const st = statusAgendaGiro(e);
+                                return st && <span className={`font-medium ${st.cor}`} title={st.titulo}> · {st.texto}</span>;
+                              })()}
+                            </span>
+                          )}
                         </div>
                       ) : (
                         <span className="text-xs text-gray-300 italic">não configurado</span>
@@ -867,6 +932,15 @@ export default function EmpresasPage() {
                     return st && <span className={`font-medium ${st.cor}`} title={st.titulo}> · {st.texto}</span>;
                   })()}
                 </p>
+                {empresaSel.giro_habilitado && (
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    📊 MonitorGiro {empresaSel.monitor_giro_versao ? `v${empresaSel.monitor_giro_versao}` : 'versão não reportada'}
+                    {(() => {
+                      const st = statusAgendaGiro(empresaSel);
+                      return st && <span className={`font-medium ${st.cor}`} title={st.titulo}> · {st.texto}</span>;
+                    })()}
+                  </p>
+                )}
               </div>
               <div className="flex flex-wrap justify-end gap-2">
                 <button onClick={() => atualizarHealth(empresaSel.cnpj)}
@@ -896,6 +970,13 @@ export default function EmpresasPage() {
                   className="px-3 py-1.5 text-xs bg-violet-100 text-violet-700 rounded-lg hover:bg-violet-200 transition-colors">
                   ⚙ Atualizar serviço
                 </button>
+                {empresaSel.giro_habilitado && (
+                  <button onClick={abrirAgendamentoGiro}
+                    title="Agendar a atualização do MonitorGiro desta empresa (versão + janela diária)"
+                    className="px-3 py-1.5 text-xs bg-teal-100 text-teal-700 rounded-lg hover:bg-teal-200 transition-colors">
+                    📊 Atualizar MonitorGiro
+                  </button>
+                )}
                 <button onClick={() => { setPortaEditando(null); setAplicacaoPorta('mvc_logidoc'); setFormPorta({ nome: 'API Delphi', porta_local: '8082', protocolo: 'http', principal: portas.length === 0, aplicacao: 'giro_web', produto: 'mvc_logidoc' }); setModal('nova-porta'); }}
                   className="px-3 py-1.5 text-xs bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors">
                   + Porta
@@ -1232,6 +1313,78 @@ export default function EmpresasPage() {
                 disabled={salvando || !formPorta.nome || !formPorta.porta_local}
                 className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50">
                 {salvando ? 'Salvando...' : (portaEditando ? 'Salvar alterações' : 'Adicionar')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal Atualização do MonitorGiro ────────────────────── */}
+      {modal === 'agendar-giro' && empresaSel && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
+            <h2 className="text-lg font-bold text-gray-900 mb-1">Atualizar MonitorGiro</h2>
+            <p className="text-sm text-gray-500 mb-1">{empresaSel.razao_social}</p>
+            <p className="text-sm text-gray-500 mb-4">
+              Versão atual: <code className="bg-gray-100 px-1 rounded">{empresaSel.monitor_giro_versao || '—'}</code>
+              {empresaSel.monitor_giro_versao_alvo && (
+                <> · alvo atual: <code className="bg-gray-100 px-1 rounded">{empresaSel.monitor_giro_versao_alvo}</code>
+                  {(empresaSel.monitor_giro_tentativas_falhas ?? 0) > 0 && (
+                    <span className="text-amber-600"> ({empresaSel.monitor_giro_tentativas_falhas}/3 falhas)</span>
+                  )}
+                </>
+              )}
+            </p>
+            <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs px-3 py-2.5 rounded-lg mb-4">
+              O serviço MonitorGiro é parado durante a troca. Se o giro, a correlação ou o sweep estiverem rodando,
+              a troca espera terminar (trava de execução do MonitorGiro). Evite janelas entre 23h e 6h, quando
+              essas rotinas rodam.
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Versão alvo</label>
+                <select value={formAgendamento.versaoAlvo} onChange={e => setFormAgendamento(f => ({ ...f, versaoAlvo: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                  <option value="">Selecione uma versão...</option>
+                  {releases.filter(r => r.produto === 'monitor_giro').map(r => (
+                    <option key={r.id} value={r.versao}>v{r.versao}{r.changelog ? ` — ${r.changelog.slice(0, 40)}` : ''}</option>
+                  ))}
+                </select>
+                {releases.filter(r => r.produto === 'monitor_giro').length === 0 && (
+                  <p className="text-xs text-gray-400 mt-1">Nenhuma versão do MonitorGiro publicada — envie em Versões.</p>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Janela — início</label>
+                  <input type="time" value={formAgendamento.janelaInicio}
+                    onChange={e => setFormAgendamento(f => ({ ...f, janelaInicio: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Janela — fim</label>
+                  <input type="time" value={formAgendamento.janelaFim}
+                    onChange={e => setFormAgendamento(f => ({ ...f, janelaFim: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                </div>
+              </div>
+              <p className="text-xs text-gray-400">
+                Todo dia, dentro dessa janela, o CloudflaredService tenta atualizar até conseguir. Depois de 3 tentativas
+                falhas ele para sozinho e espera você reagendar (reagendar zera o contador).
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 mt-5">
+              {empresaSel.monitor_giro_versao_alvo && (
+                <button onClick={cancelarAgendamentoGiro} disabled={agendando}
+                  title="Remove a versão alvo e a janela — o CloudflaredService para de tentar a partir da próxima sincronização (reinício ou ~1h)"
+                  className="mr-auto px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg disabled:opacity-50">
+                  Cancelar agendamento
+                </button>
+              )}
+              <button onClick={() => setModal('portas')} className="px-4 py-2 text-sm text-gray-600">Fechar</button>
+              <button onClick={salvarAgendamentoGiro} disabled={agendando || !formAgendamento.versaoAlvo}
+                className="px-4 py-2 bg-teal-600 text-white text-sm font-medium rounded-lg hover:bg-teal-700 disabled:opacity-50">
+                {agendando ? 'Agendando...' : 'Agendar'}
               </button>
             </div>
           </div>
