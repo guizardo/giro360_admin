@@ -37,6 +37,8 @@ export interface Empresa {
   backend_url: string | null;
   ativo: boolean;
   giro_habilitado: boolean;
+  // Pesquisa por codigo interno (tag por empresa; padrao false)
+  pesquisa_codigo_interno: boolean;
   created_at: string;
   // Tunnel principal (LEFT JOIN tunnel_portas WHERE principal = true)
   porta_id: number | null;

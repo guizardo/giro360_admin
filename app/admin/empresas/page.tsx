@@ -180,6 +180,10 @@ export default function EmpresasPage() {
     try { await api.atualizarEmpresa(e.cnpj, { giro_habilitado: !e.giro_habilitado }); carregar(); }
     catch (err: unknown) { alert(err instanceof Error ? err.message : 'Erro.'); }
   }
+  async function togglePesquisaCodigoInterno(e: Empresa) {
+    try { await api.atualizarEmpresa(e.cnpj, { pesquisa_codigo_interno: !e.pesquisa_codigo_interno }); carregar(); }
+    catch (err: unknown) { alert(err instanceof Error ? err.message : 'Erro.'); }
+  }
 
   function abrirExcluirEmpresa(e: Empresa) {
     setConfirmExcluirTexto('');
@@ -868,6 +872,11 @@ export default function EmpresasPage() {
                           title="Controla se o painel de instalação guiada do CloudflaredService mostra a seção do MonitorGiro para esta empresa"
                           className={`px-2 py-1 text-xs rounded transition-colors ${e.giro_habilitado ? 'bg-teal-100 text-teal-700 hover:bg-teal-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
                           📊 Giro {e.giro_habilitado ? 'habilitado' : 'desabilitado'}
+                        </button>
+                        <button onClick={() => togglePesquisaCodigoInterno(e)}
+                          title="Quando ativo, a pesquisa de produtos do giro não exige código de barras (EAN) e exibe o código principal de qualquer tamanho"
+                          className={`px-2 py-1 text-xs rounded transition-colors ${e.pesquisa_codigo_interno ? 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+                          Pesquisa por código interno {e.pesquisa_codigo_interno ? 'ativa' : 'inativa'}
                         </button>
                         {usuario?.role === 'superadmin' && (
                           <button onClick={() => abrirExcluirEmpresa(e)}
