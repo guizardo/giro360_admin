@@ -184,6 +184,10 @@ export default function EmpresasPage() {
     try { await api.atualizarEmpresa(e.cnpj, { pesquisa_codigo_interno: !e.pesquisa_codigo_interno }); carregar(); }
     catch (err: unknown) { alert(err instanceof Error ? err.message : 'Erro.'); }
   }
+  async function toggleSimuladorReforma(e: Empresa) {
+    try { await api.atualizarEmpresa(e.cnpj, { simulador_reforma: !e.simulador_reforma }); carregar(); }
+    catch (err: unknown) { alert(err instanceof Error ? err.message : 'Erro.'); }
+  }
 
   function abrirExcluirEmpresa(e: Empresa) {
     setConfirmExcluirTexto('');
@@ -878,6 +882,15 @@ export default function EmpresasPage() {
                           className={`px-2 py-1 text-xs rounded transition-colors ${e.pesquisa_codigo_interno ? 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
                           Pesquisa por código interno {e.pesquisa_codigo_interno ? 'ativa' : 'inativa'}
                         </button>
+                        {usuario?.role === 'superadmin' ? (
+                          <button onClick={() => toggleSimuladorReforma(e)}
+                            title="Libera no Giro 360 as telas Simulador CBS 2027 e Fornecedores do Simples (vale no próximo login do usuário)"
+                            className={`px-2 py-1 text-xs rounded transition-colors ${e.simulador_reforma ? 'bg-amber-100 text-amber-800 hover:bg-amber-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+                            🧾 Simulador Reforma {e.simulador_reforma ? 'habilitado' : 'desabilitado'}
+                          </button>
+                        ) : e.simulador_reforma && (
+                          <span className="px-2 py-1 text-xs rounded bg-amber-100 text-amber-800">🧾 Simulador Reforma habilitado</span>
+                        )}
                         {usuario?.role === 'superadmin' && (
                           <button onClick={() => abrirExcluirEmpresa(e)}
                             className="px-2 py-1 text-xs bg-red-50 text-red-600 rounded hover:bg-red-100 transition-colors">

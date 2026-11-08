@@ -39,6 +39,8 @@ export interface Empresa {
   giro_habilitado: boolean;
   // Pesquisa por codigo interno (tag por empresa; padrao false)
   pesquisa_codigo_interno: boolean;
+  // Simulador da Reforma (CBS 2027 + Fornecedores do Simples) liberado no giro_web; so superadmin altera
+  simulador_reforma: boolean;
   created_at: string;
   // Tunnel principal (LEFT JOIN tunnel_portas WHERE principal = true)
   porta_id: number | null;
