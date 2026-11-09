@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
 import { api, getUsuario, type Release, type Usuario } from '@/lib/api';
-import { lerVersaoExe } from '@/lib/exeVersion';
+import { lerVersaoExe, lerTextoVersaoExe, produtoPorNomeExe, type ProdutoRelease } from '@/lib/exeVersion';
 
 const PRODUTO_LABEL: Record<string, string> = {
   mvc_logidoc: 'MVC_LOGIDOC',
@@ -23,7 +23,10 @@ export default function VersoesPage() {
   const [erro, setErro]         = useState('');
   const [busca, setBusca]       = useState('');
   const [modal, setModal]       = useState<null | 'upload' | 'excluir'>(null);
-  const [formProduto, setFormProduto] = useState<'mvc_logidoc' | 'petshop_api' | 'logidoc_api_rest' | 'cloudflared_service' | 'monitor_giro'>('mvc_logidoc');
+  const [formProduto, setFormProduto] = useState<ProdutoRelease | ''>('');
+  // Como a aplicacao foi definida: pelo nome do arquivo, pelo nome original
+  // gravado no exe (copia renomeada) ou escolhida a mao.
+  const [produtoOrigem, setProdutoOrigem] = useState<'arquivo' | 'exe' | 'manual' | null>(null);
   const [formVersao, setFormVersao]         = useState('');
   const [formChangelog, setFormChangelog]   = useState('');
   const [formArquivo, setFormArquivo]       = useState<File | null>(null);
@@ -51,7 +54,7 @@ export default function VersoesPage() {
   });
 
   function abrirUpload() {
-    setFormProduto('mvc_logidoc'); setFormVersao(''); setFormChangelog(''); setFormArquivo(null);
+    setFormProduto(''); setProdutoOrigem(null); setFormVersao(''); setFormChangelog(''); setFormArquivo(null);
     setVersaoDoExe(null);
     setModal('upload');
   }
@@ -59,18 +62,30 @@ export default function VersoesPage() {
   async function escolherArquivo(arquivo: File | null) {
     setFormArquivo(arquivo);
     setVersaoDoExe(null);
+    setFormVersao('');
+    setFormProduto(''); setProdutoOrigem(null);
     if (!arquivo) return;
     setLendoExe(true);
     try {
+      // Aplicacao: pelo nome do arquivo; se nao reconhecer (copia renomeada),
+      // pelo OriginalFilename gravado no VERSIONINFO do exe.
+      let produto = produtoPorNomeExe(arquivo.name);
+      let origem: 'arquivo' | 'exe' | null = produto ? 'arquivo' : null;
+      if (!produto) {
+        produto = produtoPorNomeExe(await lerTextoVersaoExe(arquivo, 'OriginalFilename'));
+        if (produto) origem = 'exe';
+      }
+      if (produto) { setFormProduto(produto); setProdutoOrigem(origem); }
+
       const v = await lerVersaoExe(arquivo);
       setVersaoDoExe(v);
       if (v) setFormVersao(v);
-    } catch { /* sem versao legivel -- fica o campo manual */ }
+    } catch { /* sem versao/nome legivel -- ficam os campos manuais */ }
     finally { setLendoExe(false); }
   }
 
   async function enviarRelease() {
-    if (!formVersao.trim() || !formArquivo) return;
+    if (!formVersao.trim() || !formArquivo || !formProduto) return;
     setEnviando(true);
     try {
       await api.uploadRelease(formProduto, formVersao.trim(), formChangelog.trim(), formArquivo);
@@ -198,15 +213,31 @@ export default function VersoesPage() {
             <h2 className="text-lg font-bold text-gray-900 mb-4">Nova versão</h2>
             <div className="space-y-3">
               <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Arquivo (.exe)</label>
+                <input type="file" accept=".exe" onChange={e => escolherArquivo(e.target.files?.[0] || null)}
+                  className="w-full text-sm text-gray-600" />
+              </div>
+              <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Produto</label>
-                <select value={formProduto} onChange={e => setFormProduto(e.target.value as typeof formProduto)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <select value={formProduto}
+                  onChange={e => { setFormProduto(e.target.value as ProdutoRelease | ''); setProdutoOrigem(e.target.value ? 'manual' : null); }}
+                  className={`w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 ${produtoOrigem === 'arquivo' || produtoOrigem === 'exe' ? 'bg-gray-50' : ''}`}>
+                  <option value="" disabled>{formArquivo ? 'Escolha a aplicação' : 'Escolha o arquivo primeiro'}</option>
                   <option value="mvc_logidoc">MVC_LOGIDOC</option>
                   <option value="petshop_api">PetShop_API</option>
                   <option value="logidoc_api_rest">LogiDoc_API_REST</option>
                   <option value="cloudflared_service">CloudflaredService</option>
                   <option value="monitor_giro">MonitorGiro</option>
                 </select>
+                {produtoOrigem === 'arquivo' && (
+                  <p className="text-xs text-green-700 mt-1">✓ Identificado pelo nome do arquivo.</p>
+                )}
+                {produtoOrigem === 'exe' && (
+                  <p className="text-xs text-green-700 mt-1">✓ Identificado pelo nome original gravado no executável (arquivo renomeado).</p>
+                )}
+                {formArquivo && !lendoExe && !formProduto && (
+                  <p className="text-xs text-amber-700 mt-1">Não reconheci a aplicação pelo nome do arquivo — escolha na lista.</p>
+                )}
                 {formProduto === 'cloudflared_service' && (
                   <p className="text-xs text-amber-700 mt-1">
                     Autoatualização só funciona em clientes já na 1.1.1.31 ou superior.
@@ -218,11 +249,6 @@ export default function VersoesPage() {
                     e o MonitorGiro com a trava de execução (a troca espera o giro terminar).
                   </p>
                 )}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Arquivo (.exe)</label>
-                <input type="file" onChange={e => escolherArquivo(e.target.files?.[0] || null)}
-                  className="w-full text-sm text-gray-600" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Versão</label>
@@ -249,7 +275,7 @@ export default function VersoesPage() {
             </div>
             <div className="flex justify-end gap-2 mt-5">
               <button onClick={() => setModal(null)} className="px-4 py-2 text-sm text-gray-600">Cancelar</button>
-              <button onClick={enviarRelease} disabled={enviando || lendoExe || !formVersao.trim() || !formArquivo}
+              <button onClick={enviarRelease} disabled={enviando || lendoExe || !formVersao.trim() || !formArquivo || !formProduto}
                 className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50">
                 {enviando ? 'Enviando...' : 'Enviar'}
               </button>
